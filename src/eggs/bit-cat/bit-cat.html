@@ -1,0 +1,110 @@
+<html>
+  <head>
+<title>bit-cat</title>
+<style type="text/css">
+  <!--
+      CODE {
+             color: #666666;
+           }
+      EM {
+           font-weight: bold;
+           font-style: normal;
+         }
+      DT.function { 
+                    background: #f5f5f5;
+                    color: black;
+                    padding: 0.1em;
+                    border: 1px solid #bbbaaf;
+                    font-family: monospace;
+                  }
+      PRE {
+        background: #efeee0;
+        padding: 0.1em;
+        border: 1px solid #bbbaaf;
+      }
+      TABLE {
+        background: #f5f5f5;
+        padding: 0.2em;
+      }
+      TH {
+        border-bottom: 1px solid black;
+      }
+    -->
+</style>
+</head>
+<body>
+
+<center><img src="egg.jpg"></center>
+<center><a href="index.html">back</a></center>
+
+<h2>bit-cat</h2>
+
+<h3>Description:</h3>
+Bitwise Concatentor for u8vectors.
+
+<h3>Author:</h3>
+<a href="mailto:bk2@alum.wpi.edu">Ben Kurtz</a>.
+
+<h3>Version:</h3>
+<ul>
+<li>0.1
+Initial version.
+</li>
+</ul>
+
+<h3>Usage:</h3>
+<pre>
+(require-extension bit-cat)
+</pre>
+
+<h3>Download:</h3>
+<a href="bit-cat.egg">bit-cat.egg</a>
+
+<h3>Documentation:</h3>
+<p>This egg provides a way to concatenate two u8vectors on a bitwise basis. </p>
+<p>Pass in a left-hand-side (LHS) value and a right-hand-side (RHS) value and bitlengths for both.</p>
+<p>The bits of the LHS will be concatenated into the RHS in a right-justified manner.</p>
+<p>This is mainly useful for aggregating bitfields.</p>
+<p>Future Work: Also supply left-justified concatenation.</p>
+<br/>
+<dl>
+
+<dt class="function"><em>(procedure)</em> (bit-cat LHS LHS-BL RHS RHS-BL)
+<dd>
+<p>Concatenate <code>LHS-BL</code> bits from <code>LHS</code> into u8vector <code>RHS</code> in a right-justified manner. Resulting concatenated vector will be in <code>RHS</code>, result is the total resulting bitlength. <code>RHS-BL</code> is the bitlength of data already used in <code>RHS</code>.</p> 
+</dd>
+
+</dl>
+
+
+<h3>License:</h3>
+
+<pre>
+Copyright (c) 2007, Benjamin L. Kurtz
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following
+conditions are met:
+
+  Redistributions of source code must retain the above copyright notice, this list of conditions and the following
+    disclaimer. 
+  Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following
+    disclaimer in the documentation and/or other materials provided with the distribution. 
+  Neither the name of the author nor the names of its contributors may be used to endorse or promote
+    products derived from this software without specific prior written permission. 
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
+OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+</pre>
+
+<hr><a href="index.html">back</a>
+
+</body>
+</html>
