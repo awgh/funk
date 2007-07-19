@@ -46,8 +46,16 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <net/if.h>
+         
+#ifdef __MACH__       
 #include <net/ndrv.h>
-
+#else
+#include <asm/types.h>
+#include <arpa/inet.h>
+#include <linux/if_packet.h>
+#include <linux/if_ether.h>         
+#endif
+         
 int fd;
 struct sockaddr saddr; 
 <#
@@ -56,14 +64,25 @@ struct sockaddr saddr;
 static int 
 raw_open(char *iface)
 {
+
+#ifdef __MACH__ 
 	fd = socket(AF_NDRV, SOCK_RAW, 0);
-	if(fd < 0) {
+#else
+	fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+#endif
+
+    if(fd < 0) {
 		return -1;
 	}
 	
 	// create the socket address
-	saddr.sa_len = sizeof(struct sockaddr);
+#ifdef __MACH__                 
+    saddr.sa_len = sizeof(struct sockaddr);       
 	saddr.sa_family = AF_NDRV;
+#else
+    saddr.sa_family = AF_PACKET;
+#endif                      
+                      
     strcpy(saddr.sa_data, iface);
 	//if( bind(fd, &saddr, sizeof(saddr)) == -1 )
     bind(fd, &saddr, sizeof(saddr));
