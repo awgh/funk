@@ -53,11 +53,16 @@
 #include <asm/types.h>
 #include <arpa/inet.h>
 #include <linux/if_packet.h>
-#include <linux/if_ether.h>         
+#include <linux/if_ether.h>
+#include <sys/ioctl.h>
 #endif
          
 int fd;
-struct sockaddr saddr; 
+#ifdef __MACH__
+struct sockaddr saddr;
+#else 
+struct sockaddr_ll saddr;
+#endif
 <#
 
 #>!
@@ -77,15 +82,27 @@ raw_open(char *iface)
 	
 	// create the socket address
 #ifdef __MACH__                 
-    saddr.sa_len = sizeof(struct sockaddr);       
-	saddr.sa_family = AF_NDRV;
+   saddr.sa_len = sizeof(struct sockaddr);       
+   saddr.sa_family = AF_NDRV;
+   strcpy(saddr.sa_data, iface);
 #else
-    saddr.sa_family = AF_PACKET;
-#endif                      
+   bzero(&saddr, sizeof(saddr));
+   saddr.sll_family = AF_PACKET;
+   saddr.sll_protocol = htons(ETH_P_ALL);
+
+   // in Linux, have to get interface index
+   struct ifreq ireq;
+   bzero(&ireq, sizeof(ireq));
+
+   strcpy(ireq.ifr_name,iface);  
+   if( (ioctl(fd, SIOCGIFINDEX, &ireq)) == -1) //get interface index
+     return -1;
+   else
+     saddr.sll_ifindex = ireq.ifr_ifindex;
+#endif                     
                       
-    strcpy(saddr.sa_data, iface);
 	//if( bind(fd, &saddr, sizeof(saddr)) == -1 )
-    bind(fd, &saddr, sizeof(saddr));
+    bind(fd, (struct sockaddr*)(&saddr), sizeof(saddr));
     return 0;
     // must make call to bind or it kernel panics.
     // call to bind always fails. wtf?                                       
@@ -102,7 +119,7 @@ raw_send(unsigned char *pkt, size_t len)
 
 	while( nleft > 0 )
 	{
-		nwritten = sendto( fd, ptr, nleft, 0, &saddr, sizeof(saddr) );
+		nwritten = sendto( fd, ptr, nleft, 0, (struct sockaddr*)(&saddr), sizeof(saddr) );
 		if( nwritten <= 0 )
 		{
 			if( errno == EINTR )
