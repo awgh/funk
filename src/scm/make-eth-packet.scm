@@ -7,7 +7,7 @@
 
 (define my-ip-packet (attach-tag '(ip4)
                       (list
-                       "4" "5" "10" "0020"
+                       "5" "20" "10" "0020"
                        "0030" "0" "1" "0"
                        "0755" "01" "04"
                        "A123" "192.168.1.1"
@@ -25,7 +25,7 @@
 
 ; send packet out 
 (require 'raw-sockets)
-(raw-open "en0")
+(raw-open "eth0")
 (define raw-packet (generate my-packet))
 (raw-send raw-packet (u8vector-length raw-packet))
 (raw-close)

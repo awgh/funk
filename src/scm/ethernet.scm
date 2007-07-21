@@ -9,7 +9,7 @@
                   (list 'pkt-type 16 (hex-validator 16) (hex-serializer 16)) 
                   ))
   
-  (define (generate packet aggregator) (default-generator packet fields aggregator))
+  (define (generate packet) (default-generator packet fields))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
