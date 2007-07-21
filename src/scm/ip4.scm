@@ -1,4 +1,5 @@
 ;(load "default-fcns.scm")
+(require 'crc16)
 
 (define (install-ip4-protocol)
   
@@ -25,12 +26,13 @@
     (define (ipv4-iter packet flds aggregator prevData)
       (cond ((or (null? packet) (null? flds)) prevData)
             ((eq? (car (car flds)) 'header-checksum)
-             (ipv4-iter (cdr packet) (cdr fields) aggregator (aggregator prevData (crc prevData))))
+             (ipv4-iter (cdr packet) (cdr fields) aggregator (aggregator prevData (crc-16 prevData))))
             (else (ipv4-iter (cdr packet) (cdr fields) aggregator (aggregator prevData ((car (cdddr (car flds))) (car packet)))))
             )
      (ipv4-iter packet fields aggregator '()))); need a bitfield aggregator     
   
-  (define (generate packet aggregator) (default-generator packet fields aggregator))
+  ;(define (generate packet aggregator) (default-generator packet fields aggregator))
+  (define (generate packet) (default-generator packet fields))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface

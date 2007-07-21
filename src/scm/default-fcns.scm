@@ -1,7 +1,7 @@
 (require 'regex)
-(require 'crc)
+(require 'crc16)
 (require 'srfi-66)
-;(load "load-once.scm")
+
 (load "table.scm")
 
 ;; Concatenate a u8vector
@@ -20,19 +20,6 @@
                  (u8vector-copy! v1 0 b 0  n1)
                  (u8vector-copy! v2 0 b n1 n2) 
                  b))))
-
-; test
-(u8vector-cat (make-u8vector 4 1) (make-u8vector 4 2))
-
-;(define (u8vector-cat v1 v2)
-;  (cond ((null? v2) v1)
-;        (else
-;         (let ( (buffer (make-u8vector (+ (u8vector-length v1) (u8vector-length v2)) 0)) ) 
-;           (u8vector-copy! v1 0 buffer 0 (- (u8vector-length v1) 1))
-;           (u8vector-copy! v2 0 buffer (u8vector-length v1) (- (u8vector-length v2) 1))
-;           buffer
-;           )))
-;  )
 
 ;; Data Type Validators and Serializers--------------------------------------------
 (define (mac-validator mac) (not (not (string-match "^((([a-fA-F0-9]){2}:){5}([a-fA-F0-9]){2})" mac))))
@@ -92,7 +79,7 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Generate/Validate Operations on Packets and Protocols-------------------------
-(define (generate-layer packet) ( (get-op 'generate (car packet)) (cdr packet) u8vector-cat) )
+(define (generate-layer packet) ( (get-op 'generate (car packet)) (cdr packet)) )
 (define (validate-layer packet) ( (get-op 'validate (car packet)) (cdr packet)) )
 
 (define (validate packet) 
@@ -110,15 +97,20 @@
        ))))
 ;;--------------------------------------------------------------------------------
 
+;; Protocol Field Getters
+(define (field-symbol x)    (car x))
+(define (field-bitlength x) (car (cdr x)))
+(define (field-validator x) (car (cddr x)))
+(define (field-serializer x)(car (cdddr x)))
 
 ;; Default Protocol-Internal Generators and Validators----------------------------
-  (define (default-generator packet fields aggregator) (generate-iter packet fields aggregator))  
-  (define (generate-iter packet flds aggregator)
+  (define (default-generator packet fields) (generate-iter packet fields))  
+  (define (generate-iter packet flds)
     (cond ((or (null? packet) (null? flds)) '())
           (else
-           (aggregator
-            ((car (cdddr (car flds))) (car packet))
-            (generate-iter (cdr packet) (cdr flds) aggregator))
+           (u8vector-cat
+            ((field-serializer (car flds)) (car packet))
+            (generate-iter (cdr packet) (cdr flds)))
            )))
   
   
@@ -128,7 +120,8 @@
           (else
            (cons
             
-            (cons (car (car flds)) ((car (cddr (car flds))) (car packet)))
+            (cons (field-symbol (car flds)) 
+                  ((field-validator (car flds)) (car packet)))
             
             (validate-iter (cdr packet) (cdr flds)))
            )))
