@@ -45,10 +45,10 @@
 #>!
 
 // Tells you how many bytes you need to hold a certain number of bits
-inline size_t
-bytesForBits( size_t bits )
+inline int
+bytesForBits( int bits )
 {
-	size_t retval = bits / 8;
+	int retval = bits / 8;
 	if( (bits % 8) == 0 )
 		return retval;
 	return ++retval;
@@ -60,18 +60,20 @@ bytesForBits( size_t bits )
 // result is in rhs, total result bitlength is returned                                     
                                                
 static int 
-bit_cat_right( unsigned char * lhs, size_t lhs_len, size_t lhs_bl, 
-   	   		   unsigned char * rhs, size_t rhs_len, size_t rhs_bl )
+bit_cat_right( unsigned char * lhs, int lhs_len, int lhs_bl, 
+   	   		   unsigned char * rhs, int rhs_len, int rhs_bl )
   {
+  
     // Size check 
-   	size_t totalBits  = lhs_bl + rhs_bl;
-    size_t totalBytes = bytesForBits(totalBits);  // number of bytes used total
-
-  	if( totalBytes < rhs_len )
-        return -1; // error out
-
+   	int totalBits  = lhs_bl + rhs_bl;
+    int totalBytes = bytesForBits(totalBits);  // number of bytes used total
+    
+    // TODO: should check to see if we have enough room here.
+          
     if( lhs_bl == 0 )  // nothing to do
+    {
       return rhs_bl;
+    }
                
  	// point to first byte of rhs data
  	unsigned char * beginRhs = (rhs + rhs_len) - bytesForBits(rhs_bl);
