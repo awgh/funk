@@ -1,5 +1,6 @@
 (require 'regex)
 (require 'crc16)
+(require 'bit-cat)
 (require 'srfi-66)
 
 (load "table.scm")
@@ -103,17 +104,31 @@
 (define (field-validator x) (car (cddr x)))
 (define (field-serializer x)(car (cdddr x)))
 
+(define (bytes-for-bits bits) (ceiling (/ bits 8)))
+
 ;; Default Protocol-Internal Generators and Validators----------------------------
-  (define (default-generator packet fields) (generate-iter packet fields))  
-  (define (generate-iter packet flds)
-    (cond ((or (null? packet) (null? flds)) '())
-          (else
-           (u8vector-cat
-            ((field-serializer (car flds)) (car packet))
-            (generate-iter (cdr packet) (cdr flds)))
-           )))
-  
-  
+  (define (default-generator packet fields) 
+    (let* ([buffer (make-u8vector 1024 0)]
+           [bytes  (bytes-for-bits (generate-iter packet fields buffer))]
+           [retval (make-u8vector bytes 0)])                 
+      (begin
+        ;(u8vector-copy! source source-start target target-start n)
+        (u8vector-copy! buffer (- (u8vector-length buffer) bytes) retval 0 bytes)
+        retval
+        )
+      ))
+
+  (define (generate-iter packet flds buffer)
+      (cond ((or (null? packet) (null? flds)) 0)
+            (else
+             (bit-cat
+              ((field-serializer (car flds)) (car packet))
+              (field-bitlength  (car flds))
+              buffer
+              (generate-iter (cdr packet) (cdr flds) buffer)
+              )
+             )))
+      
   (define (default-validator packet fields) (validate-iter packet fields))  
   (define (validate-iter packet flds)
     (cond ((or (null? packet) (null? flds)) '())
