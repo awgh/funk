@@ -99,10 +99,10 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Protocol Field Getters
-(define (field-symbol x)    (car x))
-(define (field-bitlength x) (car (cdr x)))
-(define (field-validator x) (car (cddr x)))
-(define (field-serializer x)(car (cdddr x)))
+(define (field-symbol x)    (vector-ref x 0))
+(define (field-bitlength x) (vector-ref x 1))
+(define (field-validator x) (vector-ref x 2))
+(define (field-serializer x)(vector-ref x 3))
 
 (define (bytes-for-bits bits) (ceiling (/ bits 8)))
 
