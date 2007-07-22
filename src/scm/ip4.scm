@@ -20,19 +20,19 @@
                   (list 'source-ip 32 ip-validator ip-serializer)                   
                   (list 'dest-ip 32 ip-validator ip-serializer)                   
                   (list 'options 0 (hex-validator 32) (hex-serializer 32))                                     
-                  ))
+                  ))   
   
-  (define (ipv4-generator packet fields aggregator)  
-    (define (ipv4-iter packet flds aggregator prevData)
-      (cond ((or (null? packet) (null? flds)) prevData)
-            ((eq? (car (car flds)) 'header-checksum)
-             (ipv4-iter (cdr packet) (cdr fields) aggregator (aggregator prevData (crc-16 prevData))))
-            (else (ipv4-iter (cdr packet) (cdr fields) aggregator (aggregator prevData ((car (cdddr (car flds))) (car packet)))))
-            )
-     (ipv4-iter packet fields aggregator '()))); need a bitfield aggregator     
+  (define (ip4-generator packet fields)
+    (let* ([buffer   (default-generator packet fields)]
+           [checksum (make-u8vector 2 0)])
+       (begin
+         (crc-16 buffer (u8vector-length buffer) checksum)
+         (u8vector-copy! checksum 0 buffer 10 2)
+         buffer
+        )
+     ))
   
-  ;(define (generate packet aggregator) (default-generator packet fields aggregator))
-  (define (generate packet) (default-generator packet fields))
+  (define (generate packet) (ip4-generator packet fields))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
