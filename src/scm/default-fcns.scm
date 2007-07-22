@@ -110,7 +110,8 @@
   (define (default-generator packet fields) 
     (let* ([buffer (make-u8vector 1024 0)]
            [bytes  (bytes-for-bits (generate-iter packet fields buffer))]
-           [retval (make-u8vector bytes 0)])                 
+           [retval (make-u8vector bytes 0)]
+           )                 
       (begin
         ;(u8vector-copy! source source-start target target-start n)
         (u8vector-copy! buffer (- (u8vector-length buffer) bytes) retval 0 bytes)
