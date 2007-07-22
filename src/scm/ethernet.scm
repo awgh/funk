@@ -4,9 +4,9 @@
   
   ;; Fields ( list of lists with values: name, bitlength, validator, serializer ) 
   (define fields (list
-                  (list 'destmac  48 mac-validator mac-serializer)
-                  (list 'srcmac   48 mac-validator mac-serializer)
-                  (list 'pkt-type 16 (hex-validator 16) (hex-serializer 16)) 
+                  (vector 'destmac  48 mac-validator mac-serializer)
+                  (vector 'srcmac   48 mac-validator mac-serializer)
+                  (vector 'pkt-type 16 (hex-validator 16) (hex-serializer 16)) 
                   ))
   
   (define (generate packet) (default-generator packet fields))
