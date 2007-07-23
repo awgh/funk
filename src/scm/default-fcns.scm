@@ -101,13 +101,13 @@
        ))))
 
 (define (generate2 packet)
-    (let loop ((orig   '())
+    (let loop ((vecs   '())
                (pack   packet))
         (if (null? pack)
-            '()
-            (begin
-                (u8vector-cat (generate-layer (car pack) orig))
-                (loop (cons (car pack) orig) (cdr pack))))))
+            (fold (lambda (a b) (u8vector-cat (cdr a) b)) '() vecs)
+            (loop (cons (cons (caar pack) (generate-layer (car pack) vecs))
+                        vecs)
+                  (cdr pack)))))
 
 ;;--------------------------------------------------------------------------------
 
