@@ -5,6 +5,9 @@
 
 (load "table.scm")
 
+(define (make-fieldvec sym len #!key (valid? hex-validator) (serial? hex-serializer))
+    (vector sym len (valid? len) (serial? len)))
+
 ;; Concatenate a u8vector
 ;; 
 (define (u8vector-cat v1 v2)
