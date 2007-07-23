@@ -99,6 +99,16 @@
        (u8vector-cat (generate-layer (car packet))
        (generate (cdr packet))
        ))))
+
+(define (generate2 packet)
+    (let loop ((orig   packet)
+               (pack   packet))
+        (if (null? pack)
+            '()
+            (begin
+                (u8vector-cat (generate-layer (car pack) orig))
+                (loop orig (cdr pack))))))
+
 ;;--------------------------------------------------------------------------------
 
 ;; Protocol Field Getters
