@@ -1,3 +1,6 @@
+
+SUBDIRS = src/eggs
+
 # A list of the programs we want to build:
 bin_PROGRAMS = remote_chicken demo1
 
