@@ -3,8 +3,6 @@
 (require 'bit-cat)
 (require 'srfi-66)
 
-(load "table.scm")
-
 (define (make-fieldvec sym len #!key (valid? hex-validator) (serial? hex-serializer))
     (vector sym len (valid? len) (serial? len)))
 
@@ -117,7 +115,8 @@
 (define (field-validator x) (vector-ref x 2))
 (define (field-serializer x)(vector-ref x 3))
 
-(define (bytes-for-bits bits) (ceiling (/ bits 8)))
+(define (bytes-for-bits bits) 
+    (ceiling (/ bits 8)))
 
 ;; Default Protocol-Internal Generators and Validators----------------------------
   (define (default-generator packet fields) 

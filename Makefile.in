@@ -30,7 +30,7 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-bin_PROGRAMS = remote_chicken$(EXEEXT)
+bin_PROGRAMS = remote_chicken$(EXEEXT) demo1$(EXEEXT)
 subdir = .
 DIST_COMMON = README $(am__configure_deps) $(srcdir)/Makefile.am \
 	$(srcdir)/Makefile.in $(top_srcdir)/configure AUTHORS COPYING \
@@ -47,12 +47,15 @@ am__installdirs = "$(DESTDIR)$(bindir)"
 binPROGRAMS_INSTALL = $(INSTALL_PROGRAM)
 PROGRAMS = $(bin_PROGRAMS)
 am__dirstamp = $(am__leading_dot)dirstamp
+am_demo1_OBJECTS = src/scm/demo1.$(OBJEXT)
+demo1_OBJECTS = $(am_demo1_OBJECTS)
+demo1_LDADD = $(LDADD)
 am_remote_chicken_OBJECTS = src/scm/repl/remote_chicken.$(OBJEXT)
 remote_chicken_OBJECTS = $(am_remote_chicken_OBJECTS)
 remote_chicken_LDADD = $(LDADD)
 DEFAULT_INCLUDES = -I.@am__isrc@
-SOURCES = $(remote_chicken_SOURCES)
-DIST_SOURCES = $(remote_chicken_SOURCES)
+SOURCES = $(demo1_SOURCES) $(remote_chicken_SOURCES)
+DIST_SOURCES = $(demo1_SOURCES) $(remote_chicken_SOURCES)
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)
@@ -154,6 +157,7 @@ top_srcdir = @top_srcdir@
 
 # The sources for each program we define:
 remote_chicken_SOURCES = src/scm/repl/remote_chicken.scm
+demo1_SOURCES = src/scm/demo1.scm
 
 # Specify how to link object files:
 LINK = csc -o bin/$@
@@ -217,6 +221,17 @@ uninstall-binPROGRAMS:
 
 clean-binPROGRAMS:
 	-test -z "$(bin_PROGRAMS)" || rm -f $(bin_PROGRAMS)
+src/scm/$(am__dirstamp):
+	@$(MKDIR_P) src/scm
+	@: > src/scm/$(am__dirstamp)
+src/scm/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) src/scm/$(DEPDIR)
+	@: > src/scm/$(DEPDIR)/$(am__dirstamp)
+src/scm/demo1.$(OBJEXT): src/scm/$(am__dirstamp) \
+	src/scm/$(DEPDIR)/$(am__dirstamp)
+demo1$(EXEEXT): $(demo1_OBJECTS) $(demo1_DEPENDENCIES) 
+	@rm -f demo1$(EXEEXT)
+	$(LINK) $(demo1_OBJECTS) $(demo1_LDADD) $(LIBS)
 src/scm/repl/$(am__dirstamp):
 	@$(MKDIR_P) src/scm/repl
 	@: > src/scm/repl/$(am__dirstamp)
@@ -231,6 +246,7 @@ remote_chicken$(EXEEXT): $(remote_chicken_OBJECTS) $(remote_chicken_DEPENDENCIES
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
+	-rm -f src/scm/demo1.$(OBJEXT)
 	-rm -f src/scm/repl/remote_chicken.$(OBJEXT)
 
 distclean-compile:
@@ -394,6 +410,8 @@ clean-generic:
 
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
+	-rm -f src/scm/$(DEPDIR)/$(am__dirstamp)
+	-rm -f src/scm/$(am__dirstamp)
 	-rm -f src/scm/repl/$(DEPDIR)/$(am__dirstamp)
 	-rm -f src/scm/repl/$(am__dirstamp)
 

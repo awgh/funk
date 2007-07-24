@@ -1,5 +1,3 @@
-(load "default-fcns.scm")
-
 (define (install-ethernet-protocol)
   
   ;; Fields ( list of lists with values: name, bitlength, validator, serializer ) 
@@ -20,4 +18,4 @@
 
 
 ;; Testing Below Here----------------------------------------------------------------
-(install-ethernet-protocol)
+;(install-ethernet-protocol)

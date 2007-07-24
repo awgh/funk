@@ -1,4 +1,3 @@
-
 ; From SICP 3.23
 (define (make-table)
   (let ((local-table (list '*table*)))

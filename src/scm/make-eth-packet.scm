@@ -1,9 +1,10 @@
-;(load "load-once.scm")
 (load "table.scm")
 (load "default-fcns.scm")
 (load "ethernet.scm")
 (load "ip4.scm")
-
+    
+(install-ethernet-protocol)
+(install-ip4-protocol)
 
 (define my-ip-packet (attach-tag '(ip4)
                       (list
@@ -25,7 +26,7 @@
 
 ; send packet out 
 (require 'raw-sockets)
-(raw-open "eth0")
+(raw-open "en0")
 (define raw-packet (generate my-packet))
 (raw-send raw-packet (u8vector-length raw-packet))
 (raw-close)
