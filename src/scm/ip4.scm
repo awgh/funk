@@ -1,4 +1,3 @@
-;(load "default-fcns.scm")
 (require 'crc16)
 
 (define (install-ip4-protocol)
@@ -43,4 +42,4 @@
 
 
 ;; Testing Below Here----------------------------------------------------------------
-(install-ip4-protocol)
+;(install-ip4-protocol)
