@@ -1,10 +1,11 @@
 (require 'regex)
 (require 'crc16)
 (require 'bit-cat)
+(require 'srfi-1) ; for fold
 (require 'srfi-66)
 
-(define (make-fieldvec sym len #!key (valid? hex-validator) (serial? hex-serializer))
-    (vector sym len (valid? len) (serial? len)))
+(define (make-fieldvec sym len #!key [valid (hex-validator len)] [serial (hex-serializer len)])
+    (vector sym len valid serial))
 
 ;; Concatenate a u8vector
 ;; 
@@ -24,16 +25,19 @@
                  b))))
 
 ;; Data Type Validators and Serializers--------------------------------------------
-(define (mac-validator mac) (not (not (string-match "^((([a-fA-F0-9]){2}:){5}([a-fA-F0-9]){2})" mac))))
+(define mac-validator (lambda ( mac ) 
+  (not (not (string-match "^((([a-fA-F0-9]){2}:){5}([a-fA-F0-9]){2})" mac)))
+  ))
 
-(define (mac-display-serializer mac) (string-substitute ":" "" mac *))
+(define mac-display-serializer (lambda ( mac )
+  (string-substitute ":" "" mac *)))
 
 (define (hexstring->u8 str start buffer)
     (u8vector-set! buffer (/ start 2)
       (string->number (substring str start (+ start 2)) 16)))
 
 
-(define (mac-serializer mac)
+(define mac-serializer (lambda ( mac )
   (define (mac-iter pmac start end buffer)
     (cond ((<= start end)
       (begin
@@ -43,7 +47,7 @@
   (define cleanmac (string-substitute ":" "" mac *))
  
   (mac-iter cleanmac 0 (- (string-length cleanmac) 2) 
-            (make-u8vector (/ (string-length cleanmac) 2) 0) ))
+            (make-u8vector (/ (string-length cleanmac) 2) 0) )))
 
 ; need to also check for valid value for bitlength
 (define (hex-validator bits) (lambda (x) (not (not (string-match "^([a-fA-F0-9])*" x)))))
@@ -81,8 +85,8 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Generate/Validate Operations on Packets and Protocols-------------------------
-(define (generate-layer packet) ( (get-op 'generate (car packet)) (cdr packet)) )
-(define (validate-layer packet) ( (get-op 'validate (car packet)) (cdr packet)) )
+(define (generate-layer packet vecs) ( (get-op 'generate (car packet)) (cdr packet) vecs ) )
+(define (validate-layer packet vecs) ( (get-op 'validate (car packet)) (cdr packet)) )
 
 (define (validate packet) 
  (cond ((null? packet) '())
@@ -91,14 +95,16 @@
        (validate (cdr packet)) 
        ))))
 
-(define (generate packet) 
+; pre-elf
+(define (generate-old packet) 
  (cond ((null? packet) '())
        (else
        (u8vector-cat (generate-layer (car packet))
        (generate (cdr packet))
        ))))
 
-(define (generate2 packet)
+; post-elf (thanks elf!)
+(define (generate packet)
     (let loop ((vecs   '())
                (pack   packet))
         (if (null? pack)
@@ -113,15 +119,16 @@
 (define (field-symbol x)    (vector-ref x 0))
 (define (field-bitlength x) (vector-ref x 1))
 (define (field-validator x) (vector-ref x 2))
-(define (field-serializer x)(vector-ref x 3))
+(define (field-serializer x)
+  (vector-ref x 3))
 
 (define (bytes-for-bits bits) 
     (ceiling (/ bits 8)))
 
 ;; Default Protocol-Internal Generators and Validators----------------------------
-  (define (default-generator packet fields) 
+  (define (default-generator packet fields vecs) 
     (let* ([buffer (make-u8vector 1024 0)]
-           [bytes  (bytes-for-bits (generate-iter packet fields buffer))]
+           [bytes  (bytes-for-bits (generate-iter packet fields buffer vecs))]
            [retval (make-u8vector bytes 0)]
            )                 
       (begin
@@ -131,14 +138,14 @@
         )
       ))
 
-  (define (generate-iter packet flds buffer)
+  (define (generate-iter packet flds buffer vecs)
       (cond ((or (null? packet) (null? flds)) 0)
             (else
              (bit-cat
               ((field-serializer (car flds)) (car packet))
               (field-bitlength  (car flds))
               buffer
-              (generate-iter (cdr packet) (cdr flds) buffer)
+              (generate-iter (cdr packet) (cdr flds) buffer vecs)
               )
              )))
       

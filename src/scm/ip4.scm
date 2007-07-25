@@ -4,25 +4,25 @@
   
   ;; Fields ( list of lists with values: name, bitlength, validator, serializer ) 
   (define fields (list
-                  (vector 'version  4 (hex-validator 4) (hex-serializer 4))
-                  (vector 'internet-header-length 4 (hex-validator 4) (hex-serializer 4))
-                  (vector 'type-of-service 8 (hex-validator 8) (hex-serializer 8)) 
-                  (vector 'total-length 16 (hex-validator 16) (hex-serializer 16)) 
-                  (vector 'identification 16 (hex-validator 16) (hex-serializer 16))                   
-                  (vector 'CE 1 (hex-validator 1) (hex-serializer 1))                   
-                  (vector 'DF 1 (hex-validator 1) (hex-serializer 1))                   
-                  (vector 'MF 1 (hex-validator 1) (hex-serializer 1))                                     
-                  (vector 'fragment-offset 13 (hex-validator 13) (hex-serializer 13))                                     
-                  (vector 'time-to-live 8 (hex-validator 8) (hex-serializer 8))                   
-                  (vector 'protocol 8 (hex-validator 8) (hex-serializer 8))
-                  (vector 'header-checksum 16 (hex-validator 16) (hex-serializer 16))                                     
-                  (vector 'source-ip 32 ip-validator ip-serializer)                   
-                  (vector 'dest-ip 32 ip-validator ip-serializer)                   
-                  (vector 'options 0 (hex-validator 32) (hex-serializer 32))                                     
+                  (make-fieldvec 'version  4 )
+                  (make-fieldvec 'internet-header-length 4 )
+                  (make-fieldvec 'type-of-service 8 ) 
+                  (make-fieldvec 'total-length 16 ) 
+                  (make-fieldvec 'identification 16 )                   
+                  (make-fieldvec 'CE 1 )                   
+                  (make-fieldvec 'DF 1 )                   
+                  (make-fieldvec 'MF 1 )                                     
+                  (make-fieldvec 'fragment-offset 13 )                                     
+                  (make-fieldvec 'time-to-live 8 )                   
+                  (make-fieldvec 'protocol 8 )
+                  (make-fieldvec 'header-checksum 16 )                                     
+                  (make-fieldvec 'source-ip 32 #:valid ip-validator #:serial ip-serializer)                   
+                  (make-fieldvec 'dest-ip   32 #:valid ip-validator #:serial ip-serializer)                   
+                  (make-fieldvec 'options    0 #:valid (hex-validator 32) #:serial (hex-serializer 32))                                     
                   ))   
   
-  (define (ip4-generator packet fields)
-    (let* ([buffer   (default-generator packet fields)]
+  (define (ip4-generator packet fields vecs)
+    (let* ([buffer   (default-generator packet fields vecs)]
            [checksum (make-u8vector 2 0)])
        (begin
          (crc-16 buffer (u8vector-length buffer) checksum)
@@ -31,7 +31,7 @@
         )
      ))
   
-  (define (generate packet) (ip4-generator packet fields))
+  (define (generate packet vecs) (ip4-generator packet fields vecs))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
