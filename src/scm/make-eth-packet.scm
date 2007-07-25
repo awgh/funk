@@ -8,31 +8,17 @@
 (install-ip4-protocol)
 (install-tcp-protocol)
 
+(define make-ethernet-layer (get-op 'make-layer '(ethernet)))
+(define make-ip-layer (get-op 'make-layer '(ip4)))
+(define make-tcp-layer (get-op 'make-layer '(tcp)))
+
 (define my-data (make-u8vector 8 255))                         
 
-(define my-tcp-packet (attach-tag '(tcp)
-                      (list
-                       "1337" "80" "7" "0"
-                       "5" "0" "0" "0" "0"
-                       "0" "0" "0" "0" "0"
-                       "5" "0" "0"
-                       )))
+(define my-tcp-packet (make-tcp-layer))
 
-(define my-ip-packet (attach-tag '(ip4)
-                      (list
-                       "4" "5" "0" "0030"
-                       "0074" "0" "1" "0"
-                       "0" "80" "6"
-                       "0" "192.168.1.1"
-                       "192.168.1.2" ""
-                       )))
+(define my-ip-packet (make-ip-layer))
 
-(define my-eth-packet (attach-tag '(ethernet)
-                      (list
-                       "12:34:56:78:90:12"
-                       "AA:BB:CC:DD:EE:FF"
-                       "0800")))
-
+(define my-eth-packet (make-ethernet-layer))
 
 (define my-packet (list my-eth-packet my-ip-packet my-tcp-packet))
 

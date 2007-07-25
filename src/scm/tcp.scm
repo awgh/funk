@@ -49,9 +49,34 @@
   (define (generate packet vecs #!key data) (tcp-generator packet fields vecs #:data data))
   (define (validate packet) (default-validator packet fields))
   
+  ;; Default values for fields
+  (define (make-layer #!key
+                      [src-port  "1337"]
+                      [dest-port "80"]
+                      [seq "7"]
+                      [ack "0"] 
+                      [offset   "5"]
+                      [reserved "0"]
+                      [CWR "0"]
+                      [ECE "0"]
+                      [URG "0"]
+                      [ACK "0"]
+                      [PSH "0"]
+                      [RST "0"]
+                      [SYN "0"]
+                      [FIN "0"]
+                      [win-size "5"]
+                      [checksum "0"]
+                      [urg-data "0"]                      
+                      [options ""]
+                      )
+    (attach-tag '(tcp)
+                (list src-port dest-port seq ack offset reserved CWR ECE URG ACK
+                      PSH RST SYN FIN win-size checksum urg-data options)))
   ;; Public Interface
-  (put-op 'generate '(tcp) generate)
-  (put-op 'validate '(tcp) validate)
+  (put-op 'generate   '(tcp) generate)
+  (put-op 'validate   '(tcp) validate)
+  (put-op 'make-layer '(tcp) make-layer)  
   
   "tcp done")
 
