@@ -31,7 +31,7 @@
         )
      ))
   
-  (define (generate packet vecs) (ip4-generator packet fields vecs))
+  (define (generate packet vecs #!key data) (ip4-generator packet fields vecs))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
