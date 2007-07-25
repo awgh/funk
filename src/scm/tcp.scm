@@ -25,12 +25,20 @@
                   ))   
   
   (define (tcp-generator packet fields vecs)
-    (let* ([buffer   (default-generator packet fields)]
-           [checksum (make-u8vector 2 0)])
+    (let* ([genbuf   (default-generator packet fields vecs)]
+           [tcpsize  (u8vector-length genbuf)]
+           [ipbuf    (cdr (car vecs))]
+           [checksum (make-u8vector 2 0)]
+           [crcbuf   (make-u8vector (+ 96 tcpsize) 0)])
        (begin
-         (crc-16 buffer (u8vector-length buffer) checksum)
-         (u8vector-copy! checksum 0 buffer 10 2)
-         buffer
+         ; copy out ip fields for tcp pseudo-header
+         (u8vector-copy! ipbuf 12 crcbuf 0 4) ; source ip
+         (u8vector-copy! ipbuf 16 crcbuf 4 4) ; dest ip
+         (u8vector-copy! ipbuf  9 crcbuf 9 1) ; protocol
+         (u8vector-copy! genbuf 0 crcbuf 12 tcpsize) ; copy the rest
+         (crc-16 crcbuf (+ 96 tcpsize) checksum)
+         (u8vector-copy! checksum 0 genbuf 16 2)
+         genbuf
         )
      ))
   
@@ -45,4 +53,4 @@
 
 
 ;; Testing Below Here----------------------------------------------------------------
-(install-tcp-protocol)
+;(install-tcp-protocol)

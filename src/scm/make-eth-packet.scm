@@ -2,9 +2,19 @@
 (load "default-fcns.scm")
 (load "ethernet.scm")
 (load "ip4.scm")
+(load "tcp.scm")
     
 (install-ethernet-protocol)
 (install-ip4-protocol)
+(install-tcp-protocol)
+
+(define my-tcp-packet (attach-tag '(tcp)
+                      (list
+                       "1337" "80" "7" "0"
+                       "0" "0" "0" "0" "0"
+                       "0" "0" "0" "0" "0"
+                       "5" "0" "0"
+                       )))
 
 (define my-ip-packet (attach-tag '(ip4)
                       (list
@@ -22,7 +32,7 @@
                        "0800")))
 
 
-(define my-packet (list my-eth-packet my-ip-packet ))
+(define my-packet (list my-eth-packet my-ip-packet my-tcp-packet))
 
 ; send packet out 
 (require 'raw-sockets)
