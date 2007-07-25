@@ -34,9 +34,33 @@
   (define (generate packet vecs #!key data) (ip4-generator packet fields vecs))
   (define (validate packet) (default-validator packet fields))
   
+  ;; Default values for fields
+  (define (make-layer #!key
+                      [version "4"]
+                      [internet-header-length "5"]
+                      [type-of-service "0"]
+                      [total-length "0030"]   ; should be lambda?
+                      [identification "0000"]
+                      [CE "0"]
+                      [DF "1"]
+                      [MF "0"]
+                      [fragment-offset "0"]
+                      [time-to-live "80"]
+                      [protocol "6"]
+                      [header-checksum "0"]
+                      [source-ip "192.168.1.1"]
+                      [dest-ip   "192.168.1.2"]
+                      [options ""]
+                      )
+    (attach-tag '(ip4)
+                (list version internet-header-length type-of-service total-length
+                      identification CE DF MF fragment-offset time-to-live protocol
+                      header-checksum source-ip dest-ip options)))
+                   
   ;; Public Interface
-  (put-op 'generate '(ip4) generate)
-  (put-op 'validate '(ip4) validate)
+  (put-op 'generate   '(ip4) generate)
+  (put-op 'validate   '(ip4) validate)
+  (put-op 'make-layer '(ip4) make-layer)
   
   "ip4 done")
 

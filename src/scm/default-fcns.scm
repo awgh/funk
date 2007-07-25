@@ -36,7 +36,6 @@
     (u8vector-set! buffer (/ start 2)
       (string->number (substring str start (+ start 2)) 16)))
 
-
 (define mac-serializer (lambda ( mac )
   (define (mac-iter pmac start end buffer)
     (cond ((<= start end)
