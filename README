@@ -27,3 +27,7 @@ OPTIONAL:
    Chicken interpreter to act as root, which will let you generate raw
    packets with Funk directly from Eclipse.  This is a gaping security hole, 
    so be careful who has access to the binary.
+
+
+Ben Kurtz - July 2007
+bk2@alum.wpi.edu

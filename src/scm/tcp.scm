@@ -24,7 +24,7 @@
                   (make-fieldvec 'options    0 #:valid (hex-validator 32) #:serial (hex-serializer 32))                                                       
                   ))   
   
-  (define (tcp-generator packet fields)
+  (define (tcp-generator packet fields vecs)
     (let* ([buffer   (default-generator packet fields)]
            [checksum (make-u8vector 2 0)])
        (begin
@@ -34,7 +34,7 @@
         )
      ))
   
-  (define (generate packet) (tcp-generator packet fields))
+  (define (generate packet vecs) (tcp-generator packet fields vecs))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
