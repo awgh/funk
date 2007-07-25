@@ -85,7 +85,8 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Generate/Validate Operations on Packets and Protocols-------------------------
-(define (generate-layer packet vecs) ( (get-op 'generate (car packet)) (cdr packet) vecs ) )
+(define (generate-layer packet vecs #!key data) ( (get-op 'generate (car packet)) 
+                                                  (cdr packet) vecs #:data data ) )
 (define (validate-layer packet vecs) ( (get-op 'validate (car packet)) (cdr packet)) )
 
 (define (validate packet) 
@@ -104,12 +105,13 @@
        ))))
 
 ; post-elf (thanks elf!)
-(define (generate packet)
+(define (generate packet #!key data)
     (let loop ((vecs   '())
                (pack   packet))
         (if (null? pack)
             (fold (lambda (a b) (u8vector-cat (cdr a) b)) '() vecs)
-            (loop (cons (cons (caar pack) (generate-layer (car pack) vecs))
+            
+            (loop (cons (cons (caar pack) (generate-layer (car pack) vecs #:data data))
                         vecs)
                   (cdr pack)))))
 

@@ -8,10 +8,12 @@
 (install-ip4-protocol)
 (install-tcp-protocol)
 
+(define my-data (make-u8vector 8 255))                         
+
 (define my-tcp-packet (attach-tag '(tcp)
                       (list
                        "1337" "80" "7" "0"
-                       "0" "0" "0" "0" "0"
+                       "5" "0" "0" "0" "0"
                        "0" "0" "0" "0" "0"
                        "5" "0" "0"
                        )))
@@ -37,7 +39,7 @@
 ; send packet out 
 (require 'raw-sockets)
 (raw-open "eth0")
-(define raw-packet (generate my-packet))
+(define raw-packet (generate my-packet #:data my-data))
 (raw-send raw-packet (u8vector-length raw-packet))
 (raw-close)
 

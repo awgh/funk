@@ -7,7 +7,7 @@
                   (make-fieldvec 'pkt-type 16 ) 
                   ))
   
-  (define (generate packet vecs) (default-generator packet fields vecs))
+  (define (generate packet vecs #!key data) (default-generator packet fields vecs))
   (define (validate packet) (default-validator packet fields))
   
   ;; Public Interface
