@@ -101,18 +101,22 @@ raw_open(char *iface)
      saddr.sll_ifindex = ireq.ifr_ifindex;
 #endif                     
                       
-	//if( bind(fd, &saddr, sizeof(saddr)) == -1 )
-    bind(fd, (struct sockaddr*)(&saddr), sizeof(saddr));
+    int t = bind(fd, (struct sockaddr*)(&saddr), sizeof(saddr));
+    if( t < 0 ) 
+      {
+        fd = -1;
+        return -1;
+      }
     return 0;
-    // must make call to bind or it kernel panics.
-    // call to bind always fails. wtf?                                       
-    //else
-    //	return -1;
 }
 
 static int 
 raw_send(unsigned char *pkt, size_t len)
 {
+    if(fd < 0) {
+		return -1;
+	}
+
 	int nleft 	 = len;
 	int nwritten = 0;
 	unsigned char * ptr = pkt;
@@ -141,6 +145,10 @@ raw_send(unsigned char *pkt, size_t len)
 static int 
 raw_close()
 {
+    if(fd < 0) {
+		return -1;
+	}
+
 	return close(fd);
 }
 <#
