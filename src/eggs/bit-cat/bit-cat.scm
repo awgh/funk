@@ -29,6 +29,7 @@
 ;
 ; Benjamin L. Kurtz
 
+(require-extension srfi-66)
 
 (declare
   (export
