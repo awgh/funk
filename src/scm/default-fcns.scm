@@ -127,9 +127,9 @@
     (ceiling (/ bits 8)))
 
 ;; Default Protocol-Internal Generators and Validators----------------------------
-  (define (default-generator packet fields vecs) 
+  (define (default-generator packet fields vecs #!key data) 
     (let* ([buffer (make-u8vector 1024 0)]
-           [bytes  (bytes-for-bits (generate-iter packet fields buffer vecs))]
+           [bytes  (bytes-for-bits (generate-iter packet fields buffer vecs #:data data))]
            [retval (make-u8vector bytes 0)]
            )                 
       (begin
@@ -139,14 +139,17 @@
         )
       ))
 
-  (define (generate-iter packet flds buffer vecs)
+  (define (generate-iter packet flds buffer vecs #!key data)
       (cond ((or (null? packet) (null? flds)) 0)
             (else
              (bit-cat
-              ((field-serializer (car flds)) (car packet))
+              ((field-serializer (car flds)) 
+               (if (procedure? (car packet))
+                   ((car packet) flds buffer vecs #:data data)
+                   (car packet)))
               (field-bitlength  (car flds))
               buffer
-              (generate-iter (cdr packet) (cdr flds) buffer vecs)
+              (generate-iter (cdr packet) (cdr flds) buffer vecs #:data data)
               )
              )))
       
