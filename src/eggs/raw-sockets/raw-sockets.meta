@@ -1,0 +1,11 @@
+;;; raw-sockets.meta
+
+((egg "raw-sockets.egg")
+ (files "raw-sockets.scm" "raw-sockets.html" "raw-sockets.setup")
+ (category net)
+ (needs easyffi srfi-66)
+ (synopsis "Simple access to UNIX raw sockets")
+ (eggdoc "doc.scm")
+ (author "Ben Kurtz")
+ (license "BSD"))
+
