@@ -8,7 +8,7 @@
                   ))
 
   (define (generate packet vecs #!key data) (default-generator packet fields vecs))
-  (define (validate packet) (default-validator packet fields))
+  (define (validate packet vecs #!key data) (default-validator packet fields vecs))
 
   ;; Default values for fields
   (define (make-layer #!key

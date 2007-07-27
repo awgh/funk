@@ -86,14 +86,26 @@
 ;; Generate/Validate Operations on Packets and Protocols-------------------------
 (define (generate-layer packet vecs #!key data) ( (get-op 'generate (car packet)) 
                                                   (cdr packet) vecs #:data data ) )
-(define (validate-layer packet vecs) ( (get-op 'validate (car packet)) (cdr packet)) )
+(define (validate-layer packet vecs #!key data) ( (get-op 'validate (car packet)) 
+                                                  (cdr packet) vecs #:data data) )
 
-(define (validate packet) 
+(define (validate-old packet #!key data) 
  (cond ((null? packet) '())
        (else 
        (cons (validate-layer (car packet))
        (validate (cdr packet)) 
        ))))
+
+(define (validate packet #!key data)
+    (let loop ((vecs   '())
+               (pack   packet))
+        (if (null? pack)
+            (fold (lambda (a b) (cons (cdr a) b)) '() vecs)
+            
+            (loop (cons (cons (caar pack) (validate-layer (car pack) vecs #:data data))
+                        vecs)
+                  (cdr pack)))))
+
 
 ; pre-elf
 (define (generate-old packet) 
@@ -153,15 +165,17 @@
               )
              )))
       
-  (define (default-validator packet fields) (validate-iter packet fields))  
-  (define (validate-iter packet flds)
+  (define (default-validator packet fields vecs #!key data) 
+    (validate-iter packet fields vecs #:data data))  
+  (define (validate-iter packet flds vecs #!key data)
     (cond ((or (null? packet) (null? flds)) '())
           (else
-           (cons
-            
+           (cons            
             (cons (field-symbol (car flds)) 
-                  ((field-validator (car flds)) (car packet)))
-            
-            (validate-iter (cdr packet) (cdr flds)))
+                  ((field-validator (car flds)) 
+                   (if (procedure? (car packet))
+                     ((car packet) flds vecs #:data data)
+                     (car packet))))            
+            (validate-iter (cdr packet) (cdr flds) vecs #:data data))
            )))
 ;;--------------------------------------------------------------------------------

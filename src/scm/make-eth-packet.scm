@@ -11,32 +11,34 @@
 (install-tcp-protocol)
 
 (define make-ethernet-layer (get-op 'make-layer '(ethernet)))
-(define make-loopback-layer (get-op 'make-layer '(loopback)))
 (define make-ip-layer (get-op 'make-layer '(ip4)))
 (define make-tcp-layer (get-op 'make-layer '(tcp)))
 
+; this one is for BSD-style loopback headers
+(define make-loopback-layer (get-op 'make-layer '(loopback)))
 
-(define my-data (make-u8vector 8 255))                         
-(define my-tcp-packet (make-tcp-layer))
-(define my-ip-packet (make-ip-layer #:source-ip "127.0.0.1" #:dest-ip "127.0.0.1"))
+(define my-packet
+  (list
+   ; Pick one L2 layer
+   (make-ethernet-layer)
+   ;(make-loopback-layer)
+   (make-ip-layer); #:source-ip "127.0.0.1" #:dest-ip "127.0.0.1")
+   (make-tcp-layer)))
+  
 
-; Pick one L2 layer
-(define my-eth-packet (make-ethernet-layer))
-(define my-packet (list my-eth-packet my-ip-packet my-tcp-packet))
-
-;(define my-loop-packet (make-loopback-layer))
-;(define my-packet (list my-loop-packet my-ip-packet my-tcp-packet))
+(define (generate-my-packet len) 
+  (let ([data (make-u8vector len 255)])
+      (generate my-packet #:data data)))
 
 ; send packet out 
 (require 'raw-sockets)
 (raw-open "eth0")
-(define raw-packet (generate my-packet #:data my-data))
-(raw-send raw-packet (u8vector-length raw-packet))
+(let ([pkt (generate-my-packet 8)]) (raw-send pkt (u8vector-length pkt)))
+(let ([pkt (generate-my-packet 16)]) (raw-send pkt (u8vector-length pkt)))
 (raw-close)
 
-;(display (validate my-packet))
-;(newline)
-;(display my-packet)
-;(display (generate my-packet))
-;(newline)
-
+; test validation
+;(define (validate-my-packet len) 
+;  (let ([data (make-u8vector len 255)])
+;      (validate my-packet #:data data)))
+;(display (validate-my-packet 16))

@@ -32,7 +32,7 @@
      ))
   
   (define (generate packet vecs #!key data) (ip4-generator packet fields vecs #:data data))
-  (define (validate packet) (default-validator packet fields))
+  (define (validate packet vecs #!key data) (default-validator packet fields vecs #:data data))
   
   ;; Default values for fields
   (define (make-layer #!key
