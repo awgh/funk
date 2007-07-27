@@ -68,7 +68,9 @@ crc_16(unsigned char * buf, int len, unsigned char *retval)
 }
 <#
 
-(define (crc-16 buffer len retval)
-  ; check for u8vectors and retval length
-  (crc_16 buffer len retval)
-)
+(define (crc-16 buffer len)
+  (let ([retval (make-u8vector 2 0)])
+    (begin 
+      (crc_16 buffer len retval)
+      retval)))
+      

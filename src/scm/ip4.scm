@@ -23,9 +23,8 @@
   
   (define (ip4-generator packet fields vecs #!key data)
     (let* ([buffer   (default-generator packet fields vecs #:data data)]
-           [checksum (make-u8vector 2 0)])
-       (begin
-         (crc-16 buffer (u8vector-length buffer) checksum)
+           [checksum (crc-16 buffer (u8vector-length buffer))])
+       (begin         
          (u8vector-copy! checksum 0 buffer 10 2)
          buffer
         )

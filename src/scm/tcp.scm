@@ -29,7 +29,6 @@
            [tcpsize  (if data (+ (u8vector-length genbuf) (u8vector-length data))
                              (u8vector-length genbuf))]
            [ipbuf    (cdr (car vecs))] ; ip layer
-           [checksum (make-u8vector 2 0)]
            [crcbuf   (make-u8vector (+ 96 tcpsize) 0)])
        (begin
          ; copy out ip fields for tcp pseudo-header
@@ -39,8 +38,7 @@
          (u8vector-set! crcbuf 11 tcpsize) ; tcp length TODO:(will only work up to 255 atm)
          (u8vector-copy! genbuf 0 crcbuf 12 (u8vector-length genbuf)) ; copy the rest
          (if data (u8vector-copy! data 0 crcbuf (+ 12 tcpsize) (u8vector-length data)))
-         (crc-16 crcbuf (u8vector-length crcbuf) checksum)
-         (u8vector-copy! checksum 0 genbuf 16 2)
+         (u8vector-copy! (crc-16 crcbuf (u8vector-length crcbuf)) 0 genbuf 16 2)
          (if data (u8vector-cat genbuf data)
          genbuf)
         )
