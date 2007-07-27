@@ -21,8 +21,8 @@
                   (make-fieldvec 'options    0 #:valid (hex-validator 32) #:serial (hex-serializer 32))                                     
                   ))   
   
-  (define (ip4-generator packet fields vecs)
-    (let* ([buffer   (default-generator packet fields vecs)]
+  (define (ip4-generator packet fields vecs #!key data)
+    (let* ([buffer   (default-generator packet fields vecs #:data data)]
            [checksum (make-u8vector 2 0)])
        (begin
          (crc-16 buffer (u8vector-length buffer) checksum)
@@ -31,7 +31,7 @@
         )
      ))
   
-  (define (generate packet vecs #!key data) (ip4-generator packet fields vecs))
+  (define (generate packet vecs #!key data) (ip4-generator packet fields vecs #:data data))
   (define (validate packet) (default-validator packet fields))
   
   ;; Default values for fields
@@ -39,7 +39,15 @@
                       [version "4"]
                       [internet-header-length "5"]
                       [type-of-service "0"]
-                      [total-length "0030"]   ; should be lambda?
+                      [total-length 
+                       (lambda (packet fields vecs #!key data) 
+                         (let* ([str (number->string 
+                                      (if data (+ 20 20 (u8vector-length data)) 40) 
+                                      16)]
+                                [strlen (string-length str)])
+                                (if (< strlen 4)
+                                    (string-append (make-string (- 4 strlen) #\0) str)
+                                    str)))]
                       [identification "0000"]
                       [CE "0"]
                       [DF "1"]
