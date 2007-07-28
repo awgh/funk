@@ -15,7 +15,13 @@ QuickStart instructions:
    interact with Chicken, and package the provided eggs into the eggs/ directory.
    It also builds the demo programs into bin/
 
-3) (as root) make install
+3) 
+(as root) chicken-setup bit-cat crc16 raw-sockets
+   This will download and install the these three eggs from 
+   the official Chicken egg repository.
+
+ALTERNATIVELY:
+(as root) make install
 
    This will install the three eggs that are packaged with funk: 
    bit-cat, crc16, and raw-sockets
