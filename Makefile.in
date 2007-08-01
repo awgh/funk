@@ -30,7 +30,7 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-bin_PROGRAMS = remote_chicken$(EXEEXT) demo1$(EXEEXT)
+bin_PROGRAMS = remote_chicken$(EXEEXT) demo1$(EXEEXT) demo2$(EXEEXT)
 subdir = .
 DIST_COMMON = README $(am__configure_deps) $(srcdir)/Makefile.am \
 	$(srcdir)/Makefile.in $(top_srcdir)/configure AUTHORS COPYING \
@@ -50,12 +50,16 @@ am__dirstamp = $(am__leading_dot)dirstamp
 am_demo1_OBJECTS = src/scm/demo1.$(OBJEXT)
 demo1_OBJECTS = $(am_demo1_OBJECTS)
 demo1_LDADD = $(LDADD)
+am_demo2_OBJECTS = src/scm/demo2.$(OBJEXT)
+demo2_OBJECTS = $(am_demo2_OBJECTS)
+demo2_LDADD = $(LDADD)
 am_remote_chicken_OBJECTS = src/scm/repl/remote_chicken.$(OBJEXT)
 remote_chicken_OBJECTS = $(am_remote_chicken_OBJECTS)
 remote_chicken_LDADD = $(LDADD)
 DEFAULT_INCLUDES = -I.@am__isrc@
-SOURCES = $(demo1_SOURCES) $(remote_chicken_SOURCES)
-DIST_SOURCES = $(demo1_SOURCES) $(remote_chicken_SOURCES)
+SOURCES = $(demo1_SOURCES) $(demo2_SOURCES) $(remote_chicken_SOURCES)
+DIST_SOURCES = $(demo1_SOURCES) $(demo2_SOURCES) \
+	$(remote_chicken_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive dvi-recursive \
 	html-recursive info-recursive install-data-recursive \
 	install-dvi-recursive install-exec-recursive \
@@ -171,6 +175,7 @@ SUBDIRS = src/eggs
 # The sources for each program we define:
 remote_chicken_SOURCES = src/scm/repl/remote_chicken.scm
 demo1_SOURCES = src/scm/demo1.scm
+demo2_SOURCES = src/scm/demo2.scm
 
 # Specify how to link object files:
 LINK = csc -o bin/$@
@@ -245,6 +250,11 @@ src/scm/demo1.$(OBJEXT): src/scm/$(am__dirstamp) \
 demo1$(EXEEXT): $(demo1_OBJECTS) $(demo1_DEPENDENCIES) 
 	@rm -f demo1$(EXEEXT)
 	$(LINK) $(demo1_OBJECTS) $(demo1_LDADD) $(LIBS)
+src/scm/demo2.$(OBJEXT): src/scm/$(am__dirstamp) \
+	src/scm/$(DEPDIR)/$(am__dirstamp)
+demo2$(EXEEXT): $(demo2_OBJECTS) $(demo2_DEPENDENCIES) 
+	@rm -f demo2$(EXEEXT)
+	$(LINK) $(demo2_OBJECTS) $(demo2_LDADD) $(LIBS)
 src/scm/repl/$(am__dirstamp):
 	@$(MKDIR_P) src/scm/repl
 	@: > src/scm/repl/$(am__dirstamp)
@@ -260,6 +270,7 @@ remote_chicken$(EXEEXT): $(remote_chicken_OBJECTS) $(remote_chicken_DEPENDENCIES
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f src/scm/demo1.$(OBJEXT)
+	-rm -f src/scm/demo2.$(OBJEXT)
 	-rm -f src/scm/repl/remote_chicken.$(OBJEXT)
 
 distclean-compile:

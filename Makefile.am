@@ -2,12 +2,14 @@
 SUBDIRS = src/eggs
 
 # A list of the programs we want to build:
-bin_PROGRAMS = remote_chicken demo1
+bin_PROGRAMS = remote_chicken demo1 demo2
 
 # The sources for each program we define:
 remote_chicken_SOURCES = src/scm/repl/remote_chicken.scm
 
 demo1_SOURCES = src/scm/demo1.scm
+
+demo2_SOURCES = src/scm/demo2.scm
 
 # The following line causes autoconf to become aware of the fact that .scm
 # files in the *_SOURCES lists should not be ignored:
