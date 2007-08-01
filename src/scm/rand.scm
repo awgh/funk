@@ -17,6 +17,12 @@
 (define make-loopback-layer (get-op 'make-layer '(loopback)))
 
 
+(define (make-random-u8vector2 len)
+    (list->u8vector (unfold zero?
+                            (lambda (x) (random 256))
+                            (lambda (x) (- x 1))
+                            (+ 1 len))))
+
 (define (make-random-u8vector len)
   (define make-random-iter (lambda (buf start blen)
                              (if (< start blen)
