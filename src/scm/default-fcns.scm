@@ -89,13 +89,6 @@
 (define (validate-layer packet vecs #!key data) ( (get-op 'validate (car packet)) 
                                                   (cdr packet) vecs #:data data) )
 
-(define (validate-old packet #!key data) 
- (cond ((null? packet) '())
-       (else 
-       (cons (validate-layer (car packet))
-       (validate (cdr packet)) 
-       ))))
-
 (define (validate packet #!key data)
     (let loop ((vecs   '())
                (pack   packet))
@@ -105,15 +98,6 @@
             (loop (cons (cons (caar pack) (validate-layer (car pack) vecs #:data data))
                         vecs)
                   (cdr pack)))))
-
-
-; pre-elf
-(define (generate-old packet) 
- (cond ((null? packet) '())
-       (else
-       (u8vector-cat (generate-layer (car packet))
-       (generate (cdr packet))
-       ))))
 
 ; post-elf (thanks elf!)
 (define (generate packet #!key data)
@@ -129,11 +113,10 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Protocol Field Getters
-(define (field-symbol x)    (vector-ref x 0))
-(define (field-bitlength x) (vector-ref x 1))
-(define (field-validator x) (vector-ref x 2))
-(define (field-serializer x)
-  (vector-ref x 3))
+(define (field-symbol x)     (vector-ref x 0))
+(define (field-bitlength x)  (vector-ref x 1))
+(define (field-validator x)  (vector-ref x 2))
+(define (field-serializer x) (vector-ref x 3))
 
 (define (bytes-for-bits bits) 
     (ceiling (/ bits 8)))
@@ -152,19 +135,23 @@
       ))
 
   (define (generate-iter packet flds buffer vecs #!key data)
-      (cond ((or (null? packet) (null? flds)) 0)
-            (else
+    (cond ((or (null? packet) (null? flds)) 0)
+          (else
+           (let ([value
+                  (if (procedure? (car packet))
+                      ((car packet) flds buffer vecs #:data data) ; then                      
+                      (car packet)) ;else
+                  ])
              (bit-cat
-              ((field-serializer (car flds)) 
-               (if (procedure? (car packet))
-                   ((car packet) flds buffer vecs #:data data)
-                   (car packet)))
+              (if (u8vector? value) value
+                  ((field-serializer (car flds)) value))
               (field-bitlength  (car flds))
               buffer
               (generate-iter (cdr packet) (cdr flds) buffer vecs #:data data)
               )
-             )))
-      
+             )
+           )))
+
   (define (default-validator packet fields vecs #!key data) 
     (validate-iter packet fields vecs #:data data))  
   (define (validate-iter packet flds vecs #!key data)
