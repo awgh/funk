@@ -4,8 +4,8 @@
   
   ;; Fields ( list of vectors with values: name, bitlength, validator, serializer ) 
   (define fields (list
-                  (make-fieldvec 'src-port  16 )
-                  (make-fieldvec 'dest-port 16 )
+                  (make-fieldvec 'src-port  16 #:valid decimal-validator #:serial uint16-serializer)
+                  (make-fieldvec 'dest-port 16 #:valid decimal-validator #:serial uint16-serializer)
                   (make-fieldvec 'seq       32 )
                   (make-fieldvec 'ack       32 )
                   (make-fieldvec 'offset     4 )

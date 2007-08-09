@@ -80,6 +80,18 @@
       (else buffer)))    
   (ip-iter (string-split ip ".") 0 3 (make-u8vector 4 0)))
 
+; this needs to be generalized
+(define (uint16-serializer str)
+  (let* ([buffer (make-u8vector 2 0)]
+         [d      (string->number str)]
+         [a      (quotient d 65536)]
+         [b      (modulo d 65536)])
+    (begin
+      (u8vector-set! buffer 0 a)
+      (u8vector-set! buffer 1 b)
+      buffer)))
+       
+(define (decimal-validator d) #t)
 
 ;;--------------------------------------------------------------------------------
 
@@ -98,6 +110,9 @@
             (loop (cons (cons (caar pack) (validate-layer (car pack) vecs #:data data))
                         vecs)
                   (cdr pack)))))
+
+; fold takes a lambda of two vars, an initial value and a datastructure
+; first applies (INIT, 1st), then (RESULT, 2nd), etc and returns result.
 
 ; post-elf (thanks elf!)
 (define (generate packet #!key data)
