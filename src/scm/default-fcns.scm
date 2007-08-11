@@ -96,8 +96,8 @@
 ;;--------------------------------------------------------------------------------
 
 ;; Generate/Validate Operations on Packets and Protocols-------------------------
-(define (generate-layer packet vecs #!key data) ( (get-op 'generate (car packet)) 
-                                                  (cdr packet) vecs #:data data ) )
+(define (generate-layer packet vecs #!key data fpkts) ( (get-op 'generate (car packet))                                                  
+                                                  (cdr packet) vecs #:data data #:fpkts fpkts ) )
 (define (validate-layer packet vecs #!key data) ( (get-op 'validate (car packet)) 
                                                   (cdr packet) vecs #:data data) )
 
@@ -111,9 +111,6 @@
                         vecs)
                   (cdr pack)))))
 
-; fold takes a lambda of two vars, an initial value and a datastructure
-; first applies (INIT, 1st), then (RESULT, 2nd), etc and returns result.
-
 ; post-elf (thanks elf!)
 (define (generate packet #!key data)
     (let loop ((vecs   '())
@@ -121,7 +118,10 @@
         (if (null? pack)
             (fold (lambda (a b) (u8vector-cat (cdr a) b)) '() vecs)
             
-            (loop (cons (cons (caar pack) (generate-layer (car pack) vecs #:data data))
+            (loop (cons 
+                   (cons 
+                    (caar pack) 
+                    (generate-layer (car pack) vecs #:data data #:fpkts (cdr pack)))
                         vecs)
                   (cdr pack)))))
 
@@ -137,9 +137,9 @@
     (ceiling (/ bits 8)))
 
 ;; Default Protocol-Internal Generators and Validators----------------------------
-  (define (default-generator packet fields vecs #!key data) 
+  (define (default-generator packet fields vecs #!key data fpkts) 
     (let* ([buffer (make-u8vector 1024 0)]
-           [bytes  (bytes-for-bits (generate-iter packet fields buffer vecs #:data data))]
+           [bytes  (bytes-for-bits (generate-iter packet fields buffer vecs #:data data #:fpkts fpkts))]
            [retval (make-u8vector bytes 0)]
            )                 
       (begin
@@ -149,12 +149,12 @@
         )
       ))
 
-  (define (generate-iter packet flds buffer vecs #!key data)
+  (define (generate-iter packet flds buffer vecs #!key data fpkts)
     (cond ((or (null? packet) (null? flds)) 0)
           (else
            (let ([value
                   (if (procedure? (car packet))
-                      ((car packet) flds buffer vecs #:data data) ; then                      
+                      ((car packet) flds buffer vecs #:data data #:fpkts fpkts) ; then                      
                       (car packet)) ;else
                   ])
              (bit-cat
@@ -162,7 +162,7 @@
                   ((field-serializer (car flds)) value))
               (field-bitlength  (car flds))
               buffer
-              (generate-iter (cdr packet) (cdr flds) buffer vecs #:data data)
+              (generate-iter (cdr packet) (cdr flds) buffer vecs #:data data #:fpkts fpkts)
               )
              )
            )))
