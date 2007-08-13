@@ -83,7 +83,7 @@ group).  most procedures are 1:3, with the args as follows:
 
 <field-union-p-simple> ::= <field-union-size> <field-props>?
 
-<field-union-p-ref ::= ref <field-name> <field-props>?
+<field-union-p-ref ::= ref <fg-name> <field-props>?
 
 <field-union-size> ::= <procedure:1:3>
 
@@ -168,4 +168,27 @@ thoughts and comments?
 ill put some examples in here soon.  im going to start working on the macro
 and record creation stuff right now.
 
+lets think... oke.  we need accessors and setters for each field.  we need 
+something to identify, create, read, and validate protocols.  we need
+field<->location mapping.
+
+
+i just realised im thinking wrong somewhat about union types because it creates
+ambiguity.  this is bad.  what we need is group-union, so that the parse tree
+doesnt have lots of options to resolve (massive speedup) as well as reducing
+complexity, so some form of lambda chaining here.
+
+so, fields need some reworking... the problem here is with the concept of
+'exact', which greatly simplifies parse trees.  this is also going to lead
+to problems because of a difference between input and output validation. 
+im thinking of things like fuzzing something with a type-length-data group
+by giving it a bad type.  we should be able to protect our input without
+sacrificing the ability to generate bad output.  perhaps logging bad out 
+but allowing it, and logging bad in but rejecting is wise.  im thinking on this.
+
+we need bad-field error handlers.  conditions.  yay.  and some other shtuff.
+im defining quasi-records to handle this and maintain type safety.
+
+
+lets see.  name, size, default, 
 
