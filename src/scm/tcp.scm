@@ -29,13 +29,16 @@
            [tcpsize  (if data (+ (u8vector-length genbuf) (u8vector-length data))
                              (u8vector-length genbuf))]
            [ipbuf    (cdr (car vecs))] ; ip layer
-           [crcbuf   (make-u8vector (+ 96 tcpsize) 0)])
+           ; i changed below from 96 to 12.  its 96 bits.  12 bytes. 
+           [crcbuf   (make-u8vector (+ 12 tcpsize) 0)])
        (begin
          ; copy out ip fields for tcp pseudo-header
          (u8vector-copy! ipbuf 12 crcbuf 0 4) ; source ip
          (u8vector-copy! ipbuf 16 crcbuf 4 4) ; dest ip
          (u8vector-copy! ipbuf  9 crcbuf 9 1) ; protocol
-         (u8vector-set! crcbuf 11 tcpsize) ; tcp length TODO:(will only work up to 255 atm)
+         ;(u8vector-set! crcbuf 11 tcpsize) ; tcp length TODO:(will only work up to 255 atm)
+         (u8vector-set! crcbuf 10 (fxand 255 (fxshr tcpsize 8)))
+         (u8vector-set! crcbuf 11 (fxand 255 tcpsize))
          (u8vector-copy! genbuf 0 crcbuf 12 (u8vector-length genbuf)) ; copy the rest
          (if data (u8vector-copy! data 0 crcbuf (+ 12 tcpsize) (u8vector-length data)))
          (u8vector-copy! (crc-16 crcbuf (u8vector-length crcbuf)) 0 genbuf 16 2)
