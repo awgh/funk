@@ -39,20 +39,22 @@
                       [internet-header-length "5"]
                       [type-of-service "0"]
                       [total-length
-                       (lambda (packet fields vecs #!key data fpkts)                          
-                         (let* ([next-pkt-tag (caaar fpkts)]
-                                [flen
-                                 (cond ( (eq? next-pkt-tag 'tcp ) 20)
-                                       ( (eq? next-pkt-tag 'udp ) 8)
-                                       (else 0))] ; fixme                                 
-                                [str (number->string 
-                                      (if data (+ 20 flen (u8vector-length data)) 
-                                          (+ 20 flen)) 
-                                      16)]
-                                [strlen (string-length str)])
-                           (if (< strlen 4)
-                               (string-append (make-string (- 4 strlen) #\0) str)
-                               str)))]
+                       (lambda (packet fields vecs #!key data fpkts)
+                         (if fpkts
+                             (let* ([next-pkt-tag (caaar fpkts)]
+                                    [flen
+                                     (cond ( (eq? next-pkt-tag 'tcp ) 20)
+                                           ( (eq? next-pkt-tag 'udp ) 8)
+                                           (else 0))] ; fixme                                 
+                                    [str (number->string
+                                          (if data (+ 20 flen (u8vector-length data))
+                                              (+ 20 flen))
+                                          16)]
+                                    [strlen (string-length str)])
+                               (if (< strlen 4)
+                                   (string-append (make-string (- 4 strlen) #\0) str)
+                                   str))
+                             "0"))]
                       [identification "0000"]
                       [CE "0"]
                       [DF "1"]
@@ -61,15 +63,12 @@
                       [time-to-live "80"]
                       [protocol                       
                        (lambda (packet fields vecs #!key data fpkts)
-                         (begin
-                           (newline)
                            (if fpkts
                                (let ([next-pkt-tag (caaar fpkts)])
                                  (cond ( (eq? next-pkt-tag 'tcp ) "06")
                                        ( (eq? next-pkt-tag 'udp ) "11")
                                        (else "0")))
-                               "0")))
-                       ]
+                               "0"))]                      
                       [header-checksum "0"]
                       [source-ip "192.168.1.1"]
                       [dest-ip   "192.168.1.2"]
