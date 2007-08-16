@@ -29,8 +29,7 @@
            [tcpsize  (if data (+ (u8vector-length genbuf) (u8vector-length data))
                              (u8vector-length genbuf))]
            [ipbuf    (cdr (car vecs))] ; ip layer
-           ; i changed below from 96 to 12.  its 96 bits.  12 bytes. 
-           [crcbuf   (make-u8vector (+ 12 tcpsize) 0)])
+           [crcbuf   (make-u8vector (+ 96 tcpsize) 0)])
        (begin
          ; copy out ip fields for tcp pseudo-header
          (u8vector-copy! ipbuf 12 crcbuf 0 4) ; source ip
