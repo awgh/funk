@@ -5,10 +5,77 @@
 ;;;; date:     31 aug 2007
 ;;;; licence:  BSD
 ;;;; purpose:  POSIX raw sockets
-;;;; version:  2.0
+;;;; version:  2.1
 ;;;; changes:  v1.0 written by bk2 (available as raw-sockets)
 ;;;;           v2.0 refactored and cleaned by elf
+;;;;           v2.1 added non-blocking read (elf)
 
+
+
+
+;; chicken library loading 
+
+(use library)    ; basic library functions (required for optimising compilation)
+(use srfi-4)     ; homogenous vectors
+(use srfi-66)    ; octet vectors
+
+
+;; chicken compile-time declarations
+
+(eval-when (compile)
+    (declare
+        (uses library srfi-4)
+        (always-bound
+            errno
+            h_errno
+            _sock_domain
+            _sock_type
+            _sock_proto
+            _sock_size
+            _mta_size
+            )
+        (bound-to-procedure
+            strerror
+            ##raw#socket
+            ##raw#makesaddr
+            ##raw#free
+            ##raw#close
+            ##raw#bind
+            ##raw#send
+            ##raw#recv
+            raw-error
+            raw-errno
+            raw-socket?
+            raw-socket-fd
+            raw-socket-saddr
+            raw-socket-iface
+            raw-socket-open
+            raw-socket-open?
+            open-raw-socket
+            raw-send
+            raw-recv
+            close-raw-socket
+            )
+        (export
+            raw-socket?
+            raw-socket-open?
+            open-raw-socket
+            raw-send
+            raw-recv
+            close-raw-socket
+            )
+        (emit-exports "dockapp.exports")
+        (block)
+        (lambda-lift)
+        (inline)
+        (compress-literals)
+        (no-bound-checks)
+        (no-procedure-checks)
+        (standard-bindings)
+        (extended-bindings)
+        (usual-integrations)
+        (interrupts-enabled)
+    ))
 
 #>
 #include <stdio.h>
