@@ -1,0 +1,9 @@
+(compile rawsock.scm -O2 -s -check-imports -dynamic -E -G -d1 -emit-exports rawsock.exports)
+
+(install-extension 'rawsock
+                   '("rawsock.so" "rawsock.html" "rawsock.exports")
+                   '((version 2.1)
+                     (documentation "rawsock.html")
+                     (exports "rawsock.exports")))
+
+
