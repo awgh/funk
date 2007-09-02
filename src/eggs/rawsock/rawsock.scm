@@ -19,6 +19,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <net/if.h>
+#include <sys/time.h>
+#include <sys/select.h>
 <#
 
 (define-foreign-variable errno int "errno")
@@ -124,6 +126,20 @@ make_saddr(char *iface, int fd)
         "return 0;"
     ))
 
+(define ##raw#recv
+    (foreign-lambda* int ((int fd) (int mtasize) (u8vector pkt))
+        "int nread;"
+        "struct timeval tv = { 0, 0 };"
+        "fd_set rds;"
+        "FD_ZERO(&rds);"
+        "FD_SET(fd, &rds);"
+        "do (nread = select(fd+1, &rds, NULL, NULL, &tv)) {"
+        "} while (errno == EINTR);"
+        "if (nread <= 0)"
+        "    return nread;"
+        "nread = read(fd, pkt, mtasize);"
+        "return nread;"
+    ))
 
 (define (raw-error pname msg . args)
     (signal
@@ -189,7 +205,17 @@ make_saddr(char *iface, int fd)
         (raw-error 'raw-recv (conc "not a raw socket: " s) s))
     (or (raw-socket-open? s)
         (raw-error 'raw-recv "raw socket is closed" s))
-    (
+    (let* ((p   (make-u8vector _mta_size))
+           (r   (##raw#recv (raw-socket-fd s) _mta_size p)))
+        (case r
+            ((-1)
+                (raw-errno 'raw-recv errno "could not recv" s))
+            ((0)
+                (make-u8vector 0))
+            (else
+                (let ((ret   (make-u8vector r)))
+                    (u8vector-copy! p 0 ret 0 r)
+                    ret)))))
 
 (define (close-raw-socket s)
     (or (raw-socket? s)
