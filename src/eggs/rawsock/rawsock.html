@@ -177,9 +177,15 @@ border: 1px solid #bbc;
 <p>Currently, this egg has only been ported to OSX and Linux.</p>
 <p>Future Work: port to Win32 and other targets.</p>
 <dl>
+<dt class="definition"><strong>procedure:</strong> (raw-socket? OBJ)</dt>
+<dd>
+<p>Returns #t if OBJ is a raw socket.</p></dd>
 <dt class="definition"><strong>procedure:</strong> (open-raw-socket INTERFACE)</dt>
 <dd>
 <p>Opens a packet socket on the given interface name.</p></dd>
+<dt class="definition"><strong>procedure:</strong> (raw-socket-open? RAWSOCK)</dt>
+<dd>
+<p>Returns #t if RAWSOCK is an open raw socket.</p></dd>
 <dt class="definition"><strong>procedure:</strong> (raw-send RAWSOCK BUFFER)</dt>
 <dd>
 <p>Sends a buffer of bytes out the opened socket.  <tt>RAWSOCK</tt> is the socket returned by open-raw-socket.  <tt>BUFFER</tt> is the u8vector containing the data to be sent.</p></dd>

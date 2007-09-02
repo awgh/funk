@@ -29,7 +29,7 @@ OTHER DEALINGS IN THE SOFTWARE.")
      (name "rawsock")
      (description (p "UNIX raw socket access"))
      
-     (author (url, email2 "Elf"))
+     (author (url ,email2 "Elf"))
      (author (url ,email1 "Ben Kurtz"))
 
      (requires
@@ -50,7 +50,9 @@ OTHER DEALINGS IN THE SOFTWARE.")
       (p "Future Work: port to Win32 and other targets.")
       
       (group
+       (procedure "(raw-socket? OBJ)" (p "Returns #t if OBJ is a raw socket."))
        (procedure "(open-raw-socket INTERFACE)" (p "Opens a packet socket on the given interface name."))
+       (procedure "(raw-socket-open? RAWSOCK)" (p "Returns #t if RAWSOCK is an open raw socket."))
        (procedure "(raw-send RAWSOCK BUFFER)" 
                   (p "Sends a buffer of bytes out the opened socket.  " 
                      (tt "RAWSOCK") " is the socket returned by open-raw-socket.  "
