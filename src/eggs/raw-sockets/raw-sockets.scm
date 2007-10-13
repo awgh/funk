@@ -309,6 +309,9 @@
         "struct ifreq ireq;"
         "bzero(&ireq, sizeof(ireq));"
         "strcpy(&ireq.ifr_name, iface);"
+        "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
+        "    return(-1);"
+        "ireq.ifr_flags = promisc;"
         "return(ioctl(fd, SIOCSIFFLAGS, &ireq));"
     ))
 
@@ -606,11 +609,14 @@
                             (raw-error 'open-raw-socket
                                        "maximum fd number reached" fd iface))
                         fd))
-           (saddr   (raw-syscall
-                        (##raw#makesaddr fd iface)
-                        (lambda () (##raw#close fd))
-                        'open-raw-socket
-                        "could not create saddr" iface))
+           (saddr   (let ((saddr   (##raw#makesaddr fd iface))
+                          (e       errno))
+                        (if (= -1 saddr)
+                            (begin
+                                (##raw#close fd)
+                                (raw-errno 'open-raw-socket e
+                                           "could not create saddr" iface))
+                            saddr)))
            (mtu     (raw-syscall
                         (##raw#getmtu fd iface)
                         (lambda () (##raw#free saddr) (##raw#close fd))
@@ -740,7 +746,8 @@
     (check-raw-socket 'close-raw-socket s s)
     (signal-mask! signal/io)
     (let ((fd      (##raw#fd s)))
-        (##raw#promisc-off fd (##raw#iface s) (##raw#flags s))
+        (if (= -1 (##raw#promisc-off fd (##raw#iface s) (##raw#flags s)))
+            (display "could not turn off promiscuous mode\n"))
         (##raw#free (##raw#saddr s))
         (##raw#close fd)
         (##raw#open! s #f)
