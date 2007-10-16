@@ -1,6 +1,0 @@
-
-(define easyffi? (string>=? (chicken-version) "2.424"))
-
-(compile -R srfi-66 -s -O2 -d1 ,@(if easyffi? '(-extend easyffi) '()) raw-sockets.scm)
-(install-extension 'raw-sockets '("raw-sockets.so" "raw-sockets.html") 
-		   '((version 0.1) (documentation "raw-sockets.html")))
