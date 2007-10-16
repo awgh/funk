@@ -1,6 +1,0 @@
-close-raw-socket
-open-raw-socket
-raw-recv
-raw-send
-raw-socket-open?
-raw-socket?
