@@ -622,6 +622,11 @@
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not get mtu size" iface))
+           (bind    (raw-syscall
+                        (##raw#bind fd saddr _ssize)
+                        (lambda () (##raw#free saddr) (##raw#close fd))
+                        'open-raw-socket
+                        "could not bind to socket" iface))
            (async   (raw-syscall
                         (##raw#async fd)
                         (lambda () (##raw#free saddr) (##raw#close fd))
@@ -632,13 +637,6 @@
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not set promiscuous mode" iface))
-           (bind    (raw-syscall
-                        (##raw#bind fd saddr _ssize)
-                        (lambda ()
-                            (##raw#promisc-off fd iface flags)
-                            (##raw#free saddr) (##raw#close fd))
-                        'open-raw-socket
-                        "could not bind to socket" iface))
            (s       (##sys#make-structure 'raw-socket
                                           fd saddr iface mtu flags #t '() #f
                                           (make-queue))))
