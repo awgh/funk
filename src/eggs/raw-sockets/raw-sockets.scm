@@ -218,7 +218,7 @@
                 "    return(-1);"
                 "bzero(&ireq, sizeof(ireq));"
                 "bzero(saddr, sizeof(struct sockaddr_ll));"
-                "strcpy(&ireq.ifr_name, iface);"
+                "strcpy((&ireq)->ifr_name, iface);"
                 "if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {"
                 "    free(saddr);"
                 "    return(-1);"
@@ -238,7 +238,7 @@
             (foreign-lambda* int ((int fd) (c-string iface))
                 "struct ifreq ireq;"
                 "bzero(&ireq, sizeof(ireq));"
-                "strcpy(&ireq.ifr_name, iface);"
+                "strcpy((&ireq)->ifr_name, iface);"
                 "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
                 "    return(-1);"
                 "return(ireq.ifr_mtu);"
@@ -270,10 +270,10 @@
             (foreign-lambda* int ((int fd) (c-string iface))
                 "struct ifreq ireq;"
                 "bzero(&ireq, sizeof(ireq));"
-                "strcpy(&ireq.ifr_name, iface);"
+                "strcpy((&ireq)->ifr_name, iface);"
                 "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
                 "    return(-1);"
-                "return(ireq.ifr_mtu - 1);"
+                "return((ireq.ifr_mtu - 1));"
             ))
         (define-foreign-variable _sdomain int "AF_NDRV")
         (define-foreign-variable _stype   int "SOCK_RAW")
@@ -293,11 +293,12 @@
         "struct ifreq ireq;"
         "int ret;"
         "bzero(&ireq, sizeof(ireq));"
-        "strcpy(&ireq.ifr_name, iface);"
+        "strcpy((&ireq)->ifr_name, iface);"
         "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
         "    return(-1);"
         "ret = ireq.ifr_flags;"
-        "ireq.ifr_flags |= IFF_PROMISC;"
+        "strcpy((&ireq)->ifr_name, iface);"
+        "(&ireq)->ifr_flags = ret | IFF_PROMISC;"
         "if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)"
         "    return(-1);"
         "return(ret);"
@@ -308,11 +309,9 @@
     (foreign-lambda* int ((int fd) (c-string iface) (int promisc))
         "struct ifreq ireq;"
         "bzero(&ireq, sizeof(ireq));"
-        "strcpy(&ireq.ifr_name, iface);"
-        "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
-        "    return(-1);"
-        "ireq.ifr_flags = promisc;"
-        "return(ioctl(fd, SIOCSIFFLAGS, &ireq));"
+        "strcpy((&ireq)->ifr_name, iface);"
+        "(&ireq)->ifr_flags = promisc;"
+        "return((ioctl(fd, SIOCSIFFLAGS, &ireq)));"
     ))
 
 ;; set asynchronous mode
@@ -634,7 +633,7 @@
                         "could not set promiscuous mode" iface))
            (async   (raw-syscall
                         (##raw#async fd)
-                        (lambda () (##raw#promisc-off fd iface)
+                        (lambda () (##raw#promisc-off fd iface flags)
                             (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not set asynchronous mode" iface))
