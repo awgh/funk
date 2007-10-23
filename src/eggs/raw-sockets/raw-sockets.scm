@@ -627,16 +627,17 @@
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not bind to socket" iface))
-           (async   (raw-syscall
-                        (##raw#async fd)
-                        (lambda () (##raw#free saddr) (##raw#close fd))
-                        'open-raw-socket
-                        "could not set asynchronous mode" iface))
            (flags   (raw-syscall
                         (##raw#promisc-on fd iface)
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not set promiscuous mode" iface))
+           (async   (raw-syscall
+                        (##raw#async fd)
+                        (lambda () (##raw#promisc-off fd iface)
+                            (##raw#free saddr) (##raw#close fd))
+                        'open-raw-socket
+                        "could not set asynchronous mode" iface))
            (s       (##sys#make-structure 'raw-socket
                                           fd saddr iface mtu flags #t '() #f
                                           (make-queue))))
