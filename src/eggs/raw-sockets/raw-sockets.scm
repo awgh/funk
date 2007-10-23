@@ -273,7 +273,7 @@
                 "strcpy((&ireq)->ifr_name, iface);"
                 "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
                 "    return(-1);"
-                "return((ireq.ifr_mtu - 1));"
+                "return((ireq.ifr_ifru.ifru_metric - 1));"
             ))
         (define-foreign-variable _sdomain int "AF_NDRV")
         (define-foreign-variable _stype   int "SOCK_RAW")
@@ -296,9 +296,9 @@
         "strcpy((&ireq)->ifr_name, iface);"
         "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
         "    return(-1);"
-        "ret = ireq.ifr_flags;"
+        "ret = ireq.ifr_ifru.ifru_flags;"
         "strcpy((&ireq)->ifr_name, iface);"
-        "(&ireq)->ifr_flags = ret | IFF_PROMISC;"
+        "ireq.ifr_ifru.ifru_flags = (ret | IFF_PROMISC);"
         "if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)"
         "    return(-1);"
         "return(ret);"
@@ -310,7 +310,7 @@
         "struct ifreq ireq;"
         "bzero(&ireq, sizeof(ireq));"
         "strcpy((&ireq)->ifr_name, iface);"
-        "(&ireq)->ifr_flags = promisc;"
+        "ireq.ifr_ifru.ifru_flags = promisc;"
         "return((ioctl(fd, SIOCSIFFLAGS, &ireq)));"
     ))
 
