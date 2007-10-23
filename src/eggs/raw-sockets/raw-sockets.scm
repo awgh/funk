@@ -70,6 +70,7 @@
             ##raw#fd
             ##raw#saddr
             ##raw#iface
+            ##raw#liface
             ##raw#mtu
             ##raw#flags
             ##raw#open?
@@ -78,11 +79,12 @@
             ##raw#wqueue
             ##raw#trecvers
             ##raw#ewqueue?
-            ##raw#fd!
-            ##raw#saddr!
-            ##raw#iface!
-            ##raw#mtu!
-            ##raw#flags!
+            ; ##raw#fd!
+            ; ##raw#saddr!
+            ; ##raw#iface!
+            ; ##raw#liface!
+            ; ##raw#mtu!
+            ; ##raw#flags!
             ##raw#open!
             ##raw#wready!
             ##raw#urecvers!
@@ -115,6 +117,7 @@
             ##raw#fd
             ##raw#saddr
             ##raw#iface
+            ##raw#liface
             ##raw#mtu
             ##raw#flags
             ##raw#open?
@@ -211,14 +214,15 @@
     (linux
         ;; make the saddr structure (struct sockaddr_ll)
         (define ##raw#makesaddr
-            (foreign-lambda* c-pointer ((int fd) (c-string iface))
+            (foreign-lambda* c-pointer ((int fd) (c-string iface) (int l))
                 "struct sockaddr_ll *saddr = (struct sockaddr_ll *)malloc(sizeof(struct sockaddr_ll));"
                 "struct ifreq ireq;"
                 "if (saddr == NULL)"
                 "    return(-1);"
-                "bzero(&ireq, sizeof(ireq));"
+                "bzero(&ireq, sizeof(struct ifreq));"
                 "bzero(saddr, sizeof(struct sockaddr_ll));"
-                "strcpy((&ireq)->ifr_name, iface);"
+                "strncpy(ireq.ifr_name, iface, l);"
+                "ireq.ifr_name[l] = '\\0';"
                 "if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {"
                 "    free(saddr);"
                 "    return(-1);"
@@ -235,10 +239,11 @@
             ))
         ;; get the MTU size
         (define ##raw#getmtu
-            (foreign-lambda* int ((int fd) (c-string iface))
+            (foreign-lambda* int ((int fd) (c-string iface) (int l))
                 "struct ifreq ireq;"
-                "bzero(&ireq, sizeof(ireq));"
-                "strcpy((&ireq)->ifr_name, iface);"
+                "bzero(&ireq, sizeof(struct ifreq));"
+                "strncpy(ireq.ifr_name, iface, l);"
+                "ireq.ifr_name[l] = '\\0';"
                 "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
                 "    return(-1);"
                 "return(ireq.ifr_mtu);"
@@ -251,13 +256,14 @@
     (macosx
         ;; make the saddr structure (struct sockaddr)
         (define ##raw#makesaddr
-            (foreign-lambda* c-pointer ((int fd) (c-string iface))
+            (foreign-lambda* c-pointer ((int fd) (c-string iface) (int l))
                 "struct sockaddr *saddr = (struct sockaddr *)malloc(sizeof(struct sockaddr));"
                 "if (saddr == NULL)"
                 "    return(-1);"
                 "saddr->sa_len = sizeof(struct sockaddr);"
                 "saddr->sa_family = AF_NDRV;"
-                "strcpy(saddr->sa_data, iface);"
+                "strncpy(saddr->sa_data, iface, l);"
+                "saddr->sa_data[l] = '\\0';"
                 "return(saddr);"
             ))
         ;; free the saddr structure (struct sockaddr)
@@ -267,13 +273,14 @@
             ))
         ;; get the MTU size
         (define ##raw#getmtu
-            (foreign-lambda* int ((int fd) (c-string iface))
+            (foreign-lambda* int ((int fd) (c-string iface) (int l))
                 "struct ifreq ireq;"
-                "bzero(&ireq, sizeof(ireq));"
-                "strcpy((&ireq)->ifr_name, iface);"
+                "bzero(&ireq, sizeof(struct ifreq));"
+                "strncpy(ireq.ifr_name, iface, l);"
+                "ireq.ifr_name[l] = '\\0';"
                 "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
                 "    return(-1);"
-                "return((ireq.ifr_ifru.ifru_metric - 1));"
+                "return((ireq.ifr_mtu - 1));"
             ))
         (define-foreign-variable _sdomain int "AF_NDRV")
         (define-foreign-variable _stype   int "SOCK_RAW")
@@ -289,16 +296,16 @@
 
 ;; turn on promiscuous mode and return the current IF_FLAGS value
 (define ##raw#promisc-on
-    (foreign-lambda* int ((int fd) (c-string iface))
+    (foreign-lambda* int ((int fd) (c-string iface) (int l))
         "struct ifreq ireq;"
         "int ret;"
-        "bzero(&ireq, sizeof(ireq));"
-        "strcpy((&ireq)->ifr_name, iface);"
+        "bzero(&ireq, sizeof(struct ifreq));"
+        "strncpy(ireq.ifr_name, iface, l);"
+        "ireq.ifr_name[l] = '\\0';"
         "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
         "    return(-1);"
-        "ret = ireq.ifr_ifru.ifru_flags;"
-        "strcpy((&ireq)->ifr_name, iface);"
-        "ireq.ifr_ifru.ifru_flags = (ret | IFF_PROMISC);"
+        "ret = ireq.ifr_flags;"
+        "ireq.ifr_flags = (ret | IFF_PROMISC);"
         "if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)"
         "    return(-1);"
         "return(ret);"
@@ -306,11 +313,12 @@
 
 ;; restore IF_FLAGS promiscuous mode state to original value
 (define ##raw#promisc-off
-    (foreign-lambda* int ((int fd) (c-string iface) (int promisc))
+    (foreign-lambda* int ((int fd) (c-string iface) (int l) (int promisc))
         "struct ifreq ireq;"
-        "bzero(&ireq, sizeof(ireq));"
-        "strcpy((&ireq)->ifr_name, iface);"
-        "ireq.ifr_ifru.ifru_flags = promisc;"
+        "bzero(&ireq, sizeof(struct ifreq));"
+        "strncpy(ireq.ifr_name, iface, l);"
+        "ireq.ifr_name[l] = '\\0';"
+        "ireq.ifr_flags = promisc;"
         "return((ioctl(fd, SIOCSIFFLAGS, &ireq)));"
     ))
 
@@ -445,40 +453,42 @@
 
 
 ;;; raw-socket structure
-;;; 1  2     3     4   5     6     7       8       9     
-;;; fd saddr iface mtu flags open? recvers wready? wqueue 
+;;; 1  2     3     4         5   6     7     8       9       10     
+;;; fd saddr iface len-iface mtu flags open? recvers wready? wqueue 
 
 ;; inline slot accessors and modifiers
 (define-inline (##raw#fd d)           (##sys#slot d 1))
 (define-inline (##raw#saddr d)        (##sys#slot d 2))
 (define-inline (##raw#iface d)        (##sys#slot d 3))
-(define-inline (##raw#mtu d)          (##sys#slot d 4))
-(define-inline (##raw#flags d)        (##sys#slot d 5))
-(define-inline (##raw#open? d)        (##sys#slot d 6))
-(define-inline (##raw#recvers d)      (##sys#slot d 7))
-(define-inline (##raw#wready? d)      (##sys#slot d 8))
-(define-inline (##raw#wqueue d)       (##sys#slot d 9))
+(define-inline (##raw#liface d)       (##sys#slot d 4))
+(define-inline (##raw#mtu d)          (##sys#slot d 5))
+(define-inline (##raw#flags d)        (##sys#slot d 6))
+(define-inline (##raw#open? d)        (##sys#slot d 7))
+(define-inline (##raw#recvers d)      (##sys#slot d 8))
+(define-inline (##raw#wready? d)      (##sys#slot d 9))
+(define-inline (##raw#wqueue d)       (##sys#slot d 10))
 
 (define-inline (##raw#trecvers d)     (map car (##raw#recvers d)))
 (define-inline (##raw#ewqueue? d)     (queue-empty? (##raw#wqueue d)))
 
-(define-inline (##raw#fd! d v)        (##sys#setslot d 1 v))
-(define-inline (##raw#saddr! d v)     (##sys#setslot d 2 v))
-(define-inline (##raw#iface! d v)     (##sys#setslot d 3 v))
-(define-inline (##raw#mtu! d v)       (##sys#setslot d 4 v))
-(define-inline (##raw#flags! d v)     (##sys#setslot d 5 v))
-(define-inline (##raw#open! d v)      (##sys#setslot d 6 v))
-(define-inline (##raw#wready! d v)    (##sys#setslot d 8 v))
+;(define-inline (##raw#fd! d v)        (##sys#setslot d 1 v))
+;(define-inline (##raw#saddr! d v)     (##sys#setslot d 2 v))
+;(define-inline (##raw#iface! d v)     (##sys#setslot d 3 v))
+;(define-inline (##raw#liface! d v)    (##sys#setslot d 4 v))
+;(define-inline (##raw#mtu! d v)       (##sys#setslot d 5 v))
+;(define-inline (##raw#flags! d v)     (##sys#setslot d 6 v))
+(define-inline (##raw#open! d v)      (##sys#setslot d 7 v))
+(define-inline (##raw#wready! d v)    (##sys#setslot d 9 v))
 
 (define-inline (##raw#urecvers! d t p)
-    (##sys#setslot d 7
+    (##sys#setslot d 8
         (let loop ((l   (##raw#recvers d)))
             (cond ((null? l)           (list (cons t p)))
                   ((eq? t (caar l))    (cons (cons t p) (cdr l)))
                   (else                (cons (car l) (loop (cdr l))))))))
 
 (define-inline (##raw#drecvers! d t)
-    (##sys#setslot d 7
+    (##sys#setslot d 8
         (let loop ((l   (##raw#recvers d)))
             (cond ((null? l)           l)
                   ((eq? t (caar l))    (cdr l))
@@ -597,7 +607,8 @@
 (define (open-raw-socket iface)
     (or (and (string? iface) (not (string-null? iface)))
         (raw-error 'open-raw-socket "iface must be a non-null string" iface))
-    (let* ((fd      (raw-syscall
+    (let* ((len     (string-length iface))
+           (fd      (raw-syscall
                         (##raw#socket _sdomain _stype _sproto)
                         (lambda () #t)
                         'open-raw-socket
@@ -608,7 +619,7 @@
                             (raw-error 'open-raw-socket
                                        "maximum fd number reached" fd iface))
                         fd))
-           (saddr   (let ((saddr   (##raw#makesaddr fd iface))
+           (saddr   (let ((saddr   (##raw#makesaddr fd iface len))
                           (e       errno))
                         (if (= -1 saddr)
                             (begin
@@ -617,7 +628,7 @@
                                            "could not create saddr" iface))
                             saddr)))
            (mtu     (raw-syscall
-                        (##raw#getmtu fd iface)
+                        (##raw#getmtu fd iface len)
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not get mtu size" iface))
@@ -626,19 +637,19 @@
                         (lambda () (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not bind to socket" iface))
-           (flags   (raw-syscall
-                        (##raw#promisc-on fd iface)
-                        (lambda () (##raw#free saddr) (##raw#close fd))
-                        'open-raw-socket
-                        "could not set promiscuous mode" iface))
            (async   (raw-syscall
                         (##raw#async fd)
-                        (lambda () (##raw#promisc-off fd iface flags)
+                        (lambda ()
                             (##raw#free saddr) (##raw#close fd))
                         'open-raw-socket
                         "could not set asynchronous mode" iface))
+           (flags   (raw-syscall
+                        (##raw#promisc-on fd iface len)
+                        (lambda () (##raw#free saddr) (##raw#close fd))
+                        'open-raw-socket
+                        "could not set promiscuous mode" iface))
            (s       (##sys#make-structure 'raw-socket
-                                          fd saddr iface mtu flags #t '() #f
+                                          fd saddr iface len mtu flags #t '() #f
                                           (make-queue))))
         (if sigio-inst
             (signal-mask! signal/io)
@@ -744,7 +755,8 @@
     (check-raw-socket 'close-raw-socket s s)
     (signal-mask! signal/io)
     (let ((fd      (##raw#fd s)))
-        (if (= -1 (##raw#promisc-off fd (##raw#iface s) (##raw#flags s)))
+        (if (= -1 (##raw#promisc-off fd (##raw#iface s) (##raw#liface s)
+                                     (##raw#flags s)))
             (display "could not turn off promiscuous mode\n"))
         (##raw#free (##raw#saddr s))
         (##raw#close fd)
