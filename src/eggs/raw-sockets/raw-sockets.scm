@@ -445,7 +445,7 @@
 ;; handle syscall calls with error handling and cleanup
 (define-inline (raw-syscall scall cleanup pname msg . margs)
     (let ((e   errno))
-        (if (< scall 0)
+        (if (= -1 scall)
             (begin
                 (cleanup)
                 (apply raw-errno pname e msg margs))
