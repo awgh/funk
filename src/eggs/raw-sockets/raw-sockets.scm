@@ -39,6 +39,7 @@
             _stype     ; socket type
             _sproto    ; socket protocol
             _ssize     ; size of relevant sockaddr* struct
+            _isize     ; IFNAMSIZ
             sigio-orig
             sigio-inst
             fd-count
@@ -252,6 +253,7 @@
         (define-foreign-variable _stype   int "SOCK_RAW")
         (define-foreign-variable _sproto  int "htons(ETH_P_ALL)")
         (define-foreign-variable _ssize   int "sizeof(struct sockaddr_ll)")
+        (define-foreign-variable _isize   int "IFNAMSIZ")
     )
     (macosx
         ;; make the saddr structure (struct sockaddr)
@@ -286,6 +288,7 @@
         (define-foreign-variable _stype   int "SOCK_RAW")
         (define-foreign-variable _sproto  int "0")
         (define-foreign-variable _ssize   int "sizeof(struct sockaddr)")
+        (define-foreign-variable _isize   int "IFNAMSIZ")
     )
     (else
         (error "raw-sockets only supported for macosx and linux targets."))
@@ -608,6 +611,8 @@
     (or (and (string? iface) (not (string-null? iface)))
         (raw-error 'open-raw-socket "iface must be a non-null string" iface))
     (let* ((len     (string-length iface))
+           (lmax    (or (< len _isize)
+                        (raw-error 'open-raw-socket "len must be < IFNAMSIZ" len)))
            (fd      (raw-syscall
                         (##raw#socket _sdomain _stype _sproto)
                         (lambda () #t)
