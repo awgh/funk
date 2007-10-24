@@ -296,7 +296,7 @@
 
 ;; turn on promiscuous mode and return the current IF_FLAGS value
 (define ##raw#promisc-on
-    (foreign-lambda* int ((int fd) (c-string iface) (int l))
+    (foreign-lambda* integer32 ((int fd) (c-string iface) (int l))
         "struct ifreq ireq;"
         "int ret;"
         "bzero(&ireq, sizeof(struct ifreq));"
@@ -313,7 +313,7 @@
 
 ;; restore IF_FLAGS promiscuous mode state to original value
 (define ##raw#promisc-off
-    (foreign-lambda* int ((int fd) (c-string iface) (int l) (int promisc))
+    (foreign-lambda* integer32 ((int fd) (c-string iface) (int l) (integer32 promisc))
         "struct ifreq ireq;"
         "bzero(&ireq, sizeof(struct ifreq));"
         "strncpy(ireq.ifr_name, iface, l);"
