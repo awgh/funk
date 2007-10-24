@@ -24,7 +24,6 @@
 (require-extension srfi-1)     ; list library
 (require-extension srfi-4)     ; homogenous numeric vectors
 (require-extension srfi-13)    ; string library
-(require-extension srfi-66)    ; octet vectors
 
 
 ;;; chicken compile-time options
@@ -96,6 +95,9 @@
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
+            raw-socket-flags
+            raw-socket-wready?
+            raw-socket-wqueue
             raw-socket-send
             raw-socket-add-recver
             raw-socket-del-recver
@@ -121,6 +123,9 @@
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
+            raw-socket-flags
+            raw-socket-wready?
+            raw-socket-wqueue
             raw-socket-recvers
             )
         (export
@@ -133,6 +138,9 @@
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
+            raw-socket-flags
+            raw-socket-wready?
+            raw-socket-wqueue
             raw-socket-send
             raw-socket-add-recver
             raw-socket-del-recver
@@ -640,6 +648,21 @@
 (define (raw-socket-mtu s)
     (check-raw-socket 'raw-socket-mtu s s)
     (##raw#mtu s))
+
+;; get the flags
+(define (raw-socket-flags s)
+    (check-raw-socket 'raw-socket-flags s s)
+    (##raw#flags s))
+
+;; get the ready status
+(define (raw-socket-wready? s)
+    (check-raw-socket 'raw-socket-wready? s s)
+    (##raw#wready? s))
+
+;; get the write queue
+(define (raw-socket-wqueue s)
+    (check-raw-socket 'raw-socket-wqueue s s)
+    (##raw#wqueue s))
 
 
 ;;; writing to a packet socket
