@@ -24,13 +24,14 @@
 (require-extension srfi-1)     ; list library
 (require-extension srfi-4)     ; homogenous numeric vectors
 (require-extension srfi-13)    ; string library
+(require-extension srfi-18)    ; threads
 
 
 ;;; chicken compile-time options
 
 (eval-when (compile)
     (declare
-        (uses library extras posix srfi-1 srfi-4 srfi-13)
+        (uses library extras posix srfi-1 srfi-4 srfi-13 srfi-18)
         (always-bound
             errno
             h_errno
@@ -40,6 +41,7 @@
             _isize     ; IFNAMSIZ
             sigio-orig
             sigio-inst
+            thread-id
             fd-count
             fd-max
             fd-table
@@ -210,19 +212,21 @@
         ;; bind the socket
         (define ##raw#bind
             (foreign-lambda* int ((int fd) (c-string iface) (int l))
-                "struct sockaddr_ll saddr;"
-                "struct ifreq ireq;"
-                "bzero(&ireq, sizeof(struct ifreq));"
-                "bzero(&saddr, sizeof(struct sockaddr_ll));"
-                "strncpy(ireq.ifr_name, iface, l);"
-                "ireq.ifr_name[l] = '\\0';"
-                "if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {"
-                "    return(-1);"
-                "}"
-                "saddr.sll_ifindex = ireq.ifr_ifindex;"
-                "saddr.sll_family = AF_PACKET;"
-                "saddr.sll_protocol = htons(ETH_P_ALL);"
-                "return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));"
+#<<BINDFUNC
+                struct sockaddr_ll saddr;
+                struct ifreq ireq;
+                bzero(&ireq, sizeof(struct ifreq));
+                bzero(&saddr, sizeof(struct sockaddr_ll));
+                strncpy(ireq.ifr_name, iface, l);
+                ireq.ifr_name[l] = '\0';
+                if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {
+                    return(-1);
+                }
+                saddr.sll_ifindex = ireq.ifr_ifindex;
+                saddr.sll_family = AF_PACKET;
+                saddr.sll_protocol = htons(ETH_P_ALL);
+                return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
+BINDFUNC
             ))
         (define-foreign-variable _sdomain int "PF_PACKET")
         (define-foreign-variable _stype   int "SOCK_RAW")
@@ -231,14 +235,16 @@
     )
     (macosx
         ;; bind the socket
-        (define ##raw#makesaddr
+        (define ##raw#bind
             (foreign-lambda* int ((int fd) (c-string iface) (int l))
-                "struct sockaddr saddr;"
-                "saddr.sa_len = sizeof(struct sockaddr);"
-                "saddr.sa_family = AF_NDRV;"
-                "strncpy(saddr.sa_data, iface, l);"
-                "saddr.sa_data[l] = '\\0';"
-                "return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));"
+#<<BINDFUNC
+                struct sockaddr saddr;
+                saddr.sa_len = sizeof(struct sockaddr);
+                saddr.sa_family = AF_NDRV;
+                strncpy(saddr.sa_data, iface, l);
+                saddr.sa_data[l] = '\0';
+                return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
+BINDFUNC
             ))
         (define-foreign-variable _sdomain int "AF_NDRV")
         (define-foreign-variable _stype   int "SOCK_RAW")
@@ -255,53 +261,73 @@
 ;; get the MTU size
 (define ##raw#getmtu
     (foreign-lambda* int ((int fd) (c-string iface) (int l))
-        "struct ifreq ireq;"
-        "bzero(&ireq, sizeof(struct ifreq));"
-        "strncpy(ireq.ifr_name, iface, l);"
-        "ireq.ifr_name[l] = '\\0';"
-        "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)"
-        "    return(-1);"
-        "return(MAKEMTU(ireq.ifr_mtu));"
+#<<MTUFUNC
+        struct ifreq ireq;
+        bzero(&ireq, sizeof(struct ifreq));
+        strncpy(ireq.ifr_name, iface, l);
+        ireq.ifr_name[l] = '\0';
+        if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)
+            return(-1);
+        return(MAKEMTU(ireq.ifr_mtu));
+MTUFUNC
     ))
 
 ;; turn on promiscuous mode and return the current IF_FLAGS value
 (define ##raw#promisc-on
     (foreign-lambda* integer32 ((int fd) (c-string iface) (int l))
-        "struct ifreq ireq;"
-        "int ret;"
-        "bzero(&ireq, sizeof(struct ifreq));"
-        "strncpy(ireq.ifr_name, iface, l);"
-        "ireq.ifr_name[l] = '\\0';"
-        "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)"
-        "    return(-1);"
-        "ret = ireq.ifr_flags;"
-        "ireq.ifr_flags = (ret | IFF_PROMISC);"
-        "if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)"
-        "    return(-1);"
-        "return(ret);"
+#<<PONFUNC
+        struct ifreq ireq;
+        int ret;
+        bzero(&ireq, sizeof(struct ifreq));
+        strncpy(ireq.ifr_name, iface, l);
+        ireq.ifr_name[l] = '\0';
+        if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)
+            return(-1);
+        ret = ireq.ifr_flags;
+        ireq.ifr_flags = (ret | IFF_PROMISC);
+        if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)
+            return(-1);
+        return(ret);
+PONFUNC
     ))
 
 ;; restore IF_FLAGS promiscuous mode state to original value
 (define ##raw#promisc-off
     (foreign-lambda* int ((int fd) (c-string iface) (int l) (integer32 promisc))
-        "struct ifreq ireq;"
-        "bzero(&ireq, sizeof(struct ifreq));"
-        "strncpy(ireq.ifr_name, iface, l);"
-        "ireq.ifr_name[l] = '\\0';"
-        "ireq.ifr_flags = promisc;"
-        "return((ioctl(fd, SIOCSIFFLAGS, &ireq)));"
+#<<POFFFUNC
+        struct ifreq ireq;
+        bzero(&ireq, sizeof(struct ifreq));
+        strncpy(ireq.ifr_name, iface, l);
+        ireq.ifr_name[l] = '\0';
+        ireq.ifr_flags = promisc;
+        return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
+POFFFUNC
     ))
 
 ;; set asynchronous mode
 (define ##raw#async
     (foreign-lambda* int ((int fd))
         "int flags;"
-        "if (fcntl(fd, F_SETOWN, getpid()) == -1)"
-        "    return(-1);"
+;        "pid_t pgid = 0 - getpid();"
+ ;       "if (fcntl(fd, F_SETOWN, pgid) == -1)"
+;        "    return(-1);"
+;        "if (ioctl(fd, SIOCSPGRP, &pgid) == -1)"
+;        "    return(-1);"
         "if ((flags = fcntl(fd, F_GETFL)) == -1)"
         "    return(-1);"
-        "flags |= O_ASYNC | O_NONBLOCK;"
-        "return(fcntl(fd, F_SETFL, flags));"
+        "flags |= O_NONBLOCK;"
+        "if (fcntl(fd, F_SETFL, flags) == -1)"
+        "    return(-1);"
+;        "flags = 1;"
+;        "if (ioctl(fd, FIOASYNC, &flags) == -1)"
+;        "    return(-1);"
+;        "if (fcntl(fd, F_SETOWN, pgid) == -1)"
+;        "    return(-1);"
+;        "if (ioctl(fd, SIOCSPGRP, &pgid) == -1)"
+;        "    return(-1);"
+;;;        "return(ioctl(fd, FIOASYNC, &flags));"
+        "return(0);"
+;;        "return(fcntl(fd, F_SETFL, flags));"
     ))
 
 
@@ -318,56 +344,62 @@
 ;; send a packet
 (define ##raw#send
     (foreign-lambda* int ((int fd) (u8vector pkt) (int len))
-        "int nleft = len;"
-        "int nwrit = 0;"
-        "unsigned char *p = pkt;"
-        "while (nleft > 0) {"
-        "    nwrit = write(fd, p, nleft);"
-        "    if (nwrit <= 0) {"
-        "        if (errno == EINTR)"
-        "            nwrit = 0;"
-        "        else"
-        "            return(-1);"
-        "    }"
-        "    nleft -= nwrit;"
-        "    p += nwrit;"
-        "}"
-        "return(0);"
+#<<SENDFUNC
+        int nleft = len;
+        int nwrit = 0;
+        unsigned char *p = pkt;
+        while (nleft > 0) {
+            nwrit = write(fd, p, nleft);
+            if (nwrit <= 0) {
+                if (errno == EINTR)
+                    nwrit = 0;
+                else
+                    return(-1);
+            }
+            nleft -= nwrit;
+            p += nwrit;
+        }
+        return(0);
+SENDFUNC
     ))
 
 ;; receive a packet
 (define ##raw#receive
     (foreign-lambda* int ((int fd) (int mtu) (u8vector pkt))
-        "int nread;"
-        "nread = read(fd, pkt, mtu);"
-        "return(nread);"
+#<<RECEIVEFUNC
+        int nread;
+        nread = read(fd, pkt, mtu);
+        return(nread);
+RECEIVEFUNC
     ))
 
 ;;; selects fds ready for read/write
 (define ##raw#select
     (foreign-lambda* int ((int mfd) (u16vector rfr) (u16vector rfw))
-        "fd_set fdsr, fdsw;"
-        "int i, ret, r, w;"
-        "struct timeval tv = { 0, 0 };"
-        "FD_ZERO(&fdsr);"
-        "FD_ZERO(&fdsw);"
-        "for (i=0; rfr[i] != 65535; i++)"
-        "    FD_SET(rfr[i], &fdsr);"
-        "for (i=0; rfw[i] != 65535; i++)"
-        "    FD_SET(rfw[i++], &fdsw);"
-        "if ((ret = select(mfd, &fdsr, &fdsw, NULL, &tv)) == -1)"
-        "    return(-1);"
-        "for (i=0, r=0; rfr[i] != 65535; i++) {"
-        "    if (FD_ISSET(rfr[i], &fdsr))"
-        "        rfr[r++] = rfr[i];"
-        "}"
-        "for (i=0, w=0; rfw[i] != 65535; i++) {"
-        "    if (FD_ISSET(rfw[i], &fdsw))"
-        "        rfw[w++] = rfw[i];"
-        "}"
-        "rfr[r] = 65535;"
-        "rfw[w] = 65535;"
-        "return(ret);"
+#<<SELECTFUNC
+        fd_set fdsr, fdsw;
+        int i, ret, r, w;
+        struct timeval tv = { 0, 0 };
+        FD_ZERO(&fdsr);
+        FD_ZERO(&fdsw);
+        for (i=0; rfr[i] != 65535; i++)
+            FD_SET(rfr[i], &fdsr);
+        for (i=0; rfw[i] != 65535; i++)
+            FD_SET(rfw[i++], &fdsw);
+        if ((ret = select(mfd, &fdsr, &fdsw, NULL, &tv)) == -1)
+            return(-1);
+        for (i=0, r=0; rfr[i] != 65535; i++) {
+            if (FD_ISSET(rfr[i], &fdsr))
+                rfr[r++] = rfr[i];
+        }
+        for (i=0, w=0; rfw[i] != 65535; i++) {
+            if (FD_ISSET(rfw[i], &fdsw))
+                rfw[w++] = rfw[i];
+        }
+        rfr[r] = 65535;
+        rfw[w] = 65535;
+        return(ret);
+SELECTFUNC
     ))
 
 
@@ -376,6 +408,7 @@
 
 ;;; variables
 
+(define thread-id     #f)
 (define sigio-orig    #f)                    ; sigio original value
 (define sigio-inst    #f)                    ; sigio handler installed?
 (define fd-count      0)                     ; total number of fds
@@ -516,13 +549,15 @@
                 (loop (+ 1 i) (u16vector-ref fd-srvec i))))))
 
 ;; handle SIGIO
-(define (##raw#sigio-handler signum)
-    (signal-mask! signal/io)
+(define (##raw#sigio-handler)
+;    (signal-mask! signal/io)
+;    (display "signal handler called\n")
     (let ((rfd   (raw-syscall
                      (##raw#select fd-max fd-srvec fd-swvec)
                      (lambda () #t)
                      '##raw#sigio-handler
                      "error in select")))
+;        (display (conc "rfd: " rfd "\n"))
         (if (= 0 rfd)
             (begin
                 (##raw#sigio-resetr)
@@ -532,8 +567,10 @@
             (begin
                 (##raw#sigio-helper-read)
                 (##raw#sigio-helper-write))))
-    (signal-unmask! signal/io)
-    (set-signal-handler! signal/io ##raw#sigio-handler))
+     (thread-yield!)
+     (##raw#sigio-handler))
+;    (signal-unmask! signal/io)
+;    (set-signal-handler! signal/io ##raw#sigio-handler))
 
 
 ;;; opening and querying raw sockets
@@ -595,15 +632,15 @@
                         'open-raw-socket
                         "could not set promiscuous mode" iface))
            (s       (##sys#make-structure 'raw-socket
-                                          fd iface mtu flags #t '() #f
+                                          fd iface mtu flags #t '() #t
                                           (make-queue))))
-        (if sigio-inst
-            (signal-mask! signal/io)
-            (begin
-                (set! sigio-inst #t)
-                (set! sigio-orig (signal-handler signal/io))
-                (set-signal-handler! signal/io ##raw#sigio-handler)
-                (signal-mask! signal/io)))
+;        (or sigio-inst
+            ;(signal-mask! signal/io)
+;            (begin
+;                (set! sigio-inst #t)
+;                (set! sigio-orig (signal-handler signal/io))
+;                (set-signal-handler! signal/io ##raw#sigio-handler)
+;                (signal-mask! signal/io)))
         (hash-table-set! fd-table fd s)
         (set! fd-max (max fd-max (+ 1 fd)))
         (set! fd-count (+ 1 fd-count))
@@ -613,7 +650,11 @@
         (set! fd-swvec (make-u16vector (+ 1 fd-count) 65535))
         (##raw#sigio-resetr)
         (##raw#sigio-resetw)
-        (signal-unmask! signal/io)
+;        (signal-unmask! signal/io)
+        (or sigio-inst
+            (begin
+                (set! sigio-inst (make-thread ##raw#sigio-handler "select"))
+                (thread-start! sigio-inst)))
         s))
 
 
@@ -709,7 +750,7 @@
 ;; close a raw-socket
 (define (close-raw-socket s)
     (check-raw-socket 'close-raw-socket s s)
-    (signal-mask! signal/io)
+;;    (signal-mask! signal/io)
     (let ((fd      (##raw#fd s)))
         (if (= -1 (##raw#promisc-off fd (##raw#iface s)
                                      (string-length (##raw#iface s))
@@ -726,10 +767,12 @@
         (set! fd-max (fold (lambda (x r) (max (+ 1 x) r)) -1 fd-list))
         (##raw#sigio-resetr)
         (##raw#sigio-resetw))
-    (signal-unmask! signal/io)
+;;    (signal-unmask! signal/io)
     (if (= 0 fd-count)
         (begin
-            (set-signal-handler! signal/io sigio-orig)
+              (thread-terminate! sigio-inst)
+
+;;            (set-signal-handler! signal/io sigio-orig)
             (set! sigio-inst #f)))
     #t)
 
