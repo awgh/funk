@@ -53,6 +53,7 @@
             ##raw#getmtu
             ##raw#promisc-on
             ##raw#promisc-off
+            ##raw#sockopts
             ##raw#send
             ##raw#receive
             ##raw#fdset-new
@@ -247,7 +248,7 @@
         (define-inline (##raw#bind fd iface len)
             (raw-syscall
                 ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
-#<<BINDFUNC
+#<<BINDPROC
                     struct sockaddr_ll saddr;
                     struct ifreq ireq;
                     bzero(&ireq, sizeof(struct ifreq));
@@ -261,7 +262,7 @@
                     saddr.sll_family = AF_PACKET;
                     saddr.sll_protocol = htons(ETH_P_ALL);
                     return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
-BINDFUNC
+BINDPROC
                     ) fd iface len)
                 #t
                 ((##raw#close fd))
@@ -284,14 +285,14 @@ BINDFUNC
         (define-inline (##raw#bind fd iface len)
             (raw-syscall
                 ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
-#<<BINDFUNC
+#<<BINDPROC
                     struct sockaddr saddr;
                     saddr.sa_len = sizeof(struct sockaddr);
                     saddr.sa_family = AF_NDRV;
                     strncpy(saddr.sa_data, iface, l);
                     saddr.sa_data[l] = '\0';
                     return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
-BINDFUNC
+BINDPROC
                     ) fd iface len)
                 #t
                 ((##raw#close fd))
@@ -331,7 +332,7 @@ MTUPROC
 (define-inline (##raw#promisc-on fd iface len)
     (raw-syscall
         ((foreign-lambda* integer32 ((integer32 fd) (c-string iface) (int l))
-#<<PONFUNC
+#<<PONPROC
             struct ifreq ireq;
             int ret;
             bzero(&ireq, sizeof(struct ifreq));
@@ -344,7 +345,7 @@ MTUPROC
             if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)
                 return(-1);
             return(ret);
-PONFUNC
+PONPROC
             ) fd iface len)
         #t
         ((##raw#close fd))
@@ -356,20 +357,51 @@ PONFUNC
 (define-inline (##raw#promisc-off fd iface len promisc)
     (raw-syscall
         ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l) (integer32 promisc))
-#<<POFFFUNC
+#<<POFFPROC
             struct ifreq ireq;
             bzero(&ireq, sizeof(struct ifreq));
             strncpy(ireq.ifr_name, iface, l);
             ireq.ifr_name[l] = '\0';
             ireq.ifr_flags = promisc;
             return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
-POFFFUNC
+POFFPROC
             ) fd iface len promisc)
         #t
         ((##raw#close fd))
         ##raw#promisc-off
         "open-raw-socket: could not reset promiscuous mode"
         fd iface len promisc))
+
+;; set socket options
+(define-inline (##raw#sockopts fd)
+    (raw-syscall
+        ((foreign-lambda* int ((integer32 fd))
+#<<SOPTSPROC1
+            int flags = 0;
+            if ((flags = fcntl(fd, F_GETFL)) == -1)
+                return(-1);
+            flags |= O_NONBLOCK;
+            return((fcntl(fd, F_SETFL, flags)));
+SOPTSPROC1
+            ) fd)
+        #t
+        ((##raw#close fd))
+        ##raw#sockopts
+        "open-raw-socket: could not set nonblocking flag"
+        fd)
+    (raw-syscall
+        ((foreign-lambda* int ((integer32 fd))
+#<<SOPTSPROC2
+            int flags = 1;
+            return((setsockopt(fd, SOL_SOCKET, SO_OOBINLINE,
+                               &flags, sizeof(int))));
+SOPTSPROC2
+            ) fd)
+        #t
+        ((##raw#close fd))
+        ##raw#sockopts
+        "open-raw-socket: could not set socket options"
+        fd))
 
 
 ;;; syscall bindings
@@ -378,7 +410,7 @@ POFFFUNC
 (define-inline (##raw#send fd pkt len)
     (raw-syscall
         ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int len))
-#<<SENDFUNC
+#<<SENDPROC
             int nleft = len;
             int nwrit = 0;
             unsigned char *p = pkt;
@@ -394,7 +426,7 @@ POFFFUNC
                 p += nwrit;
             }
             return(0);
-SENDFUNC
+SENDPROC
             ) fd pkt len)
         #t
         ()
@@ -405,8 +437,16 @@ SENDFUNC
 ;; receive a packet
 (define-inline (##raw#receive fd pkt len)
     (raw-syscall
-        ((foreign-lambda integer32 "read" integer32 u8vector integer32)
-            fd pkt len)
+        ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int l))
+#<<RECVPROC
+            int bready = 0;
+            if (ioctl(fd, FIONREAD, &bready) == -1)
+                return(-1);
+            if (bready == 0)
+                return(0);
+            return((read(fd, pkt, l)));
+RECVPROC
+            ) fd pkt len)
         #t
         ()
         ##raw#receive
@@ -573,11 +613,16 @@ SELECTPROC
         (queue-add! (##raw#wqueue d) v)))
 
 (define-inline (##raw#pwqueue! d)
-    (if (##raw#ewqueue? d)
-        (##raw#wready! d #t)
-        (let ((t   (queue-remove! (##raw#wqueue d))))
-            (##raw#wready! d #f)
-            (##raw#send (##raw#fd d) t (u8vector-length t)))))
+    (let loop ((d   d))
+        (if (##raw#ewqueue? d)
+            (##raw#wready! d #t)
+            (let* ((t   (queue-remove! (##raw#wqueue d)))
+                   (n   (##raw#send (##raw#fd d) t (u8vector-length t))))
+                (if (= n 0)
+                    (begin
+                        (queue-push-back! (##raw#wqueue d) t)
+                        (##raw#wready! d #f))
+                    (loop d))))))
 
 
 ;;; thread select handling
@@ -608,13 +653,21 @@ SELECTPROC
     (for-each
         (lambda (x)
             (let* ((d   (hash-table-ref fd-table x))
-                   (p   (make-u8vector (##raw#mtu d) 0))
-                   (r   (##raw#receive (##raw#fd d) p (##raw#mtu d)))
-                   (u   (subu8vector p 0 r)))
-                (for-each
-                    (lambda (recver)
-                        ((cdr recver) u r))
-                    (##raw#recvers d))))
+                   (f   (##raw#fd d))
+                   (m   (##raw#mtu d))
+                   (p   (make-u8vector m 0)))
+                (let loop ((r   (##raw#receive f p m))
+                           (t   100))
+                    (if (= 0 r)
+                        #t
+                        (let ((u   (subu8vector p 0 r)))
+                            (for-each
+                                (lambda (recver)
+                                    ((cdr recver) u r))
+                                (##raw#recvers d))
+                            (if (= 0 t)
+                                #t
+                                (loop (##raw#receive f p m) (- t 1))))))))
         fds))
 
 ;; helper function for exceptions
@@ -701,6 +754,7 @@ SELECTPROC
            (fd      (##raw#socket))
            (mtu     (##raw#getmtu fd iface len))
            (bind    (##raw#bind fd iface len))
+           (opts    (##raw#sockopts fd))
            (flags   (##raw#promisc-on fd iface len))
            (s       (##sys#make-structure 'raw-socket
                                           fd iface mtu flags #t '() #f
