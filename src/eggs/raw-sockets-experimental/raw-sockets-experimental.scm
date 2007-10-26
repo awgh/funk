@@ -34,17 +34,13 @@
         (uses library extras posix srfi-1 srfi-4 srfi-13 srfi-18)
         (always-bound
             rerrno
-            thread-id
-            mutex-id
             _isize
             fd-count
-            fd-max
-            fd-table
             fd-list
-            fd-wlist
             )
         (bound-to-procedure
             ##raw#strerr
+            raw-mutex-error
             raw-error
             raw-errno
             ##raw#close
@@ -56,33 +52,25 @@
             ##raw#sockopts
             ##raw#send
             ##raw#receive
-            ##raw#fdset-new
-            ##raw#fdset-add
-            ##raw#fdset-test
-            ##raw#fdset-free
-            ##raw#select-prim
-            ##raw#select
             ##raw#fd
             ##raw#iface
             ##raw#mtu
             ##raw#flags
             ##raw#open?
             ##raw#recvers
-            ##raw#wready?
             ##raw#wqueue
+            ##raw#rmutex
+            ##raw#rthread
+            ##raw#wmutex
+            ##raw#wthread
             ##raw#trecvers
             ##raw#ewqueue?
             ##raw#open!
-            ##raw#wready!
             ##raw#urecvers!
             ##raw#drecvers!
             ##raw#awqueue!
-            ##raw#pwqueue!
-            ##raw#select-resetw
-            ##raw#select-helper-write
-            ##raw#select-helper-read
-            ##raw#select-helper-excp
-            ##raw#select-handler
+            ##raw#thread-write
+            ##raw#thread-read
             raw-socket?
             raw-socket-open?
             check-raw-socket
@@ -91,8 +79,11 @@
             raw-socket-iface
             raw-socket-mtu
             raw-socket-flags
-            raw-socket-wready?
             raw-socket-wqueue
+            raw-socket-rmutex
+            raw-socket-rthread
+            raw-socket-wmutex
+            raw-socket-wthread
             raw-socket-send
             raw-socket-add-recver
             raw-socket-del-recver
@@ -106,7 +97,6 @@
             ##raw#flags
             ##raw#open?
             ##raw#recvers
-            ##raw#wready?
             ##raw#wqueue
             ##raw#trecvers
             ##raw#ewqueue?
@@ -116,7 +106,6 @@
             raw-socket-iface
             raw-socket-mtu
             raw-socket-flags
-            raw-socket-wready?
             raw-socket-wqueue
             raw-socket-recvers
             )
@@ -128,13 +117,17 @@
             raw-socket-iface
             raw-socket-mtu
             raw-socket-flags
-            raw-socket-wready?
             raw-socket-wqueue
+            raw-socket-rmutex
+            raw-socket-rthread
+            raw-socket-wmutex
+            raw-socket-wthread
             raw-socket-send
             raw-socket-add-recver
             raw-socket-del-recver
             raw-socket-recvers
             close-raw-socket
+            raw-protect-region
             )
         (emit-exports "raw-sockets-experimental.exports")
         (fixnum-arithmetic)
@@ -148,7 +141,12 @@
         (extended-bindings)
         (usual-integrations)
         (interrupts-enabled)
+        (run-time-macros)
     ))
+(eval-when (load eval)
+    (eval `(define-macro (raw-protect-region mx b . r)
+              `(raw-protect ,mx ,b ,@r)))
+    )
 
 
 ;;; FFI directives
@@ -186,18 +184,41 @@
 
 ;; c variables
 (define-foreign-variable rerrno     integer32      "errno")
-
-;; thread variables
-(define thread-id     #f)                    ; thread handle
-(define mutex-id      (make-mutex))          ; mutex handle
-
-;; errno string
 (define ##raw#strerr    (foreign-lambda c-string "strerror" integer32))
 
+;; protected regions
+(define-macro (raw-protect ml . body)
+    `(if (list? ,ml)
+         (let ((retval   (begin
+                             (for-each (lambda (x) (mutex-lock! x #f #f)) ,ml)
+                             ,@body)))
+             (for-each mutex-unlock! ,ml)
+             retval)
+         (let ((retval   (begin
+                             (mutex-lock! ,ml #f #f)
+                             ,@body)))
+             (mutex-unlock! ,ml)
+             retval)))
+
+
+;; mutex error handling
+(define (raw-mutex-error ml)
+    (cond ((not ml)        #t)
+          ((list? ml)      (for-each raw-mutex-error ml))
+          ((mutex? ml)     (mutex-unlock! ml))
+          ((thread? ml)    (thread-specific-set! ml #f) (thread-join! ml))
+          (else            (let ((rthr   (##sys#slot ml 9))
+                                 (wthr   (##sys#slot ml 11)))
+                               (thread-specific-set! wthr #f)
+                               (thread-specific-set! rthr #f)
+                               (thread-join! wthr)
+                               (thread-join! rthr)
+                               (mutex-unlock! (##sys#slot ml 8))
+                               (mutex-unlock! (##sys#slot ml 10))))))
+            
 ;; signal an error condition
-(define-inline (raw-error pname m? msg . args)
-    (and m?
-         (mutex-unlock! mutex-id))
+(define-inline (raw-error pname ml msg . args)
+    (raw-mutex-error ml)
     (signal
         (make-composite-condition
             (make-property-condition 'exn
@@ -207,17 +228,17 @@
             (make-property-condition 'raw-socket))))
 
 ;; signal an error condition from a syscall
-(define-inline (raw-errno pname m? e msg . args)
-    (apply raw-error pname m? (string-append msg " - " (##raw#strerr e)) args))
+(define-inline (raw-errno pname ml e msg . args)
+    (apply raw-error pname ml (string-append msg " - " (##raw#strerr e)) args))
 
 ;; handle syscall calls with error handling and cleanup
-(define-macro (raw-syscall scall m? cleanup pname msg . margs)
+(define-macro (raw-syscall scall ml cleanup pname msg . margs)
     `(let* ((r   ,scall)
             (e   rerrno))
          (if (= -1 r)
              (begin
                  ,@cleanup
-                 (raw-errno ',pname ,m? e ,msg ,@margs))
+                 (raw-errno ',pname ,ml e ,msg ,@margs))
              r)))
 
 
@@ -240,7 +261,7 @@
                 ((foreign-lambda* integer32 ()
                     "return((socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))));"
                     ))
-                #t
+                #f
                 ()
                 ##raw#socket
                 "open-raw-socket: could not open socket"))
@@ -264,7 +285,7 @@
                     return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
 BINDPROC
                     ) fd iface len)
-                #t
+                #f
                 ((##raw#close fd))
                 ##raw#bind
                 "open-raw-socket: could not bind socket"
@@ -277,7 +298,7 @@ BINDPROC
                 ((foreign-lambda* integer32 ()
                     "return((socket(AF_NDRV, SOCK_RAW, 0)));"
                     ))
-                #t
+                #f
                 ()
                 ##raw#socket
                 "open-raw-socket: could not open socket"))
@@ -294,7 +315,7 @@ BINDPROC
                     return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
 BINDPROC
                     ) fd iface len)
-                #t
+                #f
                 ((##raw#close fd))
                 ##raw#bind
                 "open-raw-socket: could not bind socket"
@@ -322,7 +343,7 @@ BINDPROC
             return((MAKEMTU(ireq.ifr_mtu)));
 MTUPROC
                 ) fd iface len)
-        #t
+        #f
         ((##raw#close fd))
         ##raw#getmtu
         "open-raw-socket: could not get MTU size"
@@ -347,14 +368,14 @@ MTUPROC
             return(ret);
 PONPROC
             ) fd iface len)
-        #t
+        #f
         ((##raw#close fd))
         ##raw#promisc-on
         "open-raw-socket: could not set promiscuous mode"
         fd iface len))
 
 ;; restore IF_FLAGS promiscuous mode state to original value
-(define-inline (##raw#promisc-off fd iface len promisc)
+(define-inline (##raw#promisc-off fd iface len promisc ml)
     (raw-syscall
         ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l) (integer32 promisc))
 #<<POFFPROC
@@ -366,7 +387,7 @@ PONPROC
             return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
 POFFPROC
             ) fd iface len promisc)
-        #t
+        ml
         ((##raw#close fd))
         ##raw#promisc-off
         "open-raw-socket: could not reset promiscuous mode"
@@ -384,7 +405,7 @@ POFFPROC
             return((fcntl(fd, F_SETFL, flags)));
 SOPTSPROC1
             ) fd)
-        #t
+        #f
         ((##raw#close fd))
         ##raw#sockopts
         "open-raw-socket: could not set nonblocking flag"
@@ -397,7 +418,7 @@ SOPTSPROC1
                                &flags, sizeof(int))));
 SOPTSPROC2
             ) fd)
-        #t
+        #f
         ((##raw#close fd))
         ##raw#sockopts
         "open-raw-socket: could not set socket options"
@@ -407,155 +428,58 @@ SOPTSPROC2
 ;;; syscall bindings
 
 ;; send a packet
-(define-inline (##raw#send fd pkt len)
-    (raw-syscall
-        ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int len))
+(define-inline (##raw#send fd pkt len ml)
+    (raw-protect ml
+        (raw-syscall
+            ((foreign-lambda* int ((integer32 fd) (u8vector pkt) (int len))
 #<<SENDPROC
-            int nleft = len;
-            int nwrit = 0;
-            unsigned char *p = pkt;
-            while (nleft > 0) {
-                nwrit = write(fd, p, nleft);
-                if (nwrit <= 0) {
+                int nleft = len;
+                int nwrit = 0;
+                unsigned char *p = pkt;
+                while (nleft > 0) {
+                    nwrit = write(fd, p, nleft);
+                    if (nwrit <= 0) {
+                        if ((errno == EAGAIN) || (errno == EINTR))
+                            nwrit = 0;
+                        else
+                            return(-1);
+                    }
+                    nleft -= nwrit;
+                    p += nwrit;
+                }
+                return(0);
+SENDPROC
+                ) fd pkt len)
+            ml
+            ()
+            ##raw#send
+            "raw-socket-send: could not send packet"
+            fd pkt len)))
+
+;; receive a packet
+(define-inline (##raw#receive fd pkt len ml)
+    (raw-protect ml
+        (raw-syscall
+            ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int l))
+#<<RECVPROC
+                int ret;
+                while ((ret = read(fd, pkt, l)) == -1) {
                     if (errno == EINTR)
-                        nwrit = 0;
+                        continue;
+                    else if (errno == EAGAIN)
+                        return(0);
                     else
                         return(-1);
                 }
-                nleft -= nwrit;
-                p += nwrit;
-            }
-            return(0);
-SENDPROC
-            ) fd pkt len)
-        #t
-        ()
-        ##raw#send
-        "raw-socket-send: could not send packet"
-        fd pkt len))
-
-;; receive a packet
-(define-inline (##raw#receive fd pkt len)
-    (raw-syscall
-        ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int l))
-#<<RECVPROC
-            int bready = 0;
-            if (ioctl(fd, FIONREAD, &bready) == -1)
-                return(-1);
-            if (bready == 0)
-                return(0);
-            return((read(fd, pkt, l)));
+                return(ret);
 RECVPROC
-            ) fd pkt len)
-        #t
-        ()
-        ##raw#receive
-        "raw-socket-recvers: could not read from socket"
-        fd pkt len))
+                ) fd pkt len)
+            ml
+            ()
+            ##raw#receive
+            "raw-socket-recvers: could not read from socket"
+            fd pkt len)))
 
-;; select auxilliary procedure: create and zero a FD_SET
-(define-inline (##raw#fdset-new)
-    (raw-syscall
-        ((foreign-lambda* c-pointer ()
-#<<FDNEWPROC
-            fd_set *ret = (fd_set *)malloc(sizeof(fd_set));
-            return(((ret == NULL) ? -1 : ret));
-FDNEWPROC
-            ))
-        #t
-        ()
-        ##raw#fdset-new
-        "##raw#select: could not create fd_set"))
-
-;; select auxilliary procedure: add a fd to a FD_SET
-(define ##raw#fdset-add
-    (foreign-lambda* void ((c-pointer fds) (integer32 fd))
-        "FD_SET(fd, (fd_set *)fds);"
-    ))
-
-;; select auxilliary procedure: check if a fd is a member of a FD_SET
-(define-inline (##raw#fdset-test fds fd)
-    (= 1 ((foreign-lambda* int ((c-pointer fds) (integer32 fd))
-             "return((FD_ISSET(fd, (fd_set *)fds)));"
-             ) fds fd)))
-
-;; select auxilliary procedure: free a FD_SET
-(define ##raw#fdset-free
-    (foreign-lambda* void ((c-pointer fds))
-        "free((fd_set *)fds);"
-    ))
-
-;; select auxilliary procedure: call select
-(define-inline (##raw#select-prim mfd rfds wfds efds)
-    (raw-syscall
-        ((foreign-lambda* integer32 ((integer32 mfd) 
-                                     (c-pointer rfds)
-                                     (c-pointer wfds)
-                                     (c-pointer efds))
-#<<SELECTPROC
-            struct timeval tv = { 0L, 20000L };
-            return((select(mfd, (fd_set *)rfds, (fd_set *)wfds,
-                           (fd_set *)efds, &tv)));
-SELECTPROC
-            ) mfd rfds wfds efds)
-        #t
-        ((##raw#fdset-free rfds)
-         (##raw#fdset-free wfds)
-         (##raw#fdset-free efds))
-        ##raw#select-prim
-        "##raw#select: select() call failed"
-        mfd rfds wfds efds))
-
-;; selects fds ready for read/write/error
-(define-inline (##raw#select afds wfds)
-    (let ((prf   (##raw#fdset-new))
-          (pwf   (##raw#fdset-new))
-          (pef   (##raw#fdset-new)))
-        (for-each
-            (lambda (x)
-                (##raw#fdset-add prf x)
-                (##raw#fdset-add pef x))
-            afds)
-        (for-each
-            (lambda (x)
-                (##raw#fdset-add pwf x))
-            wfds)
-        (let ((ret   (##raw#select-prim fd-max prf pwf pef)))
-            (let loop ((rtn   ret)
-                       (i     0)
-                       (f     prf)
-                       (l     afds)
-                       (cfd   '())
-                       (rfd   '())
-                       (wfd   '())
-                       (efd   '()))
-                (cond ((= 0 rtn)
-                          (##raw#fdset-free prf)
-                          (##raw#fdset-free pwf)
-                          (##raw#fdset-free pef)
-                          (vector ret
-                                  (if (= 0 i) cfd rfd)
-                                  (if (= 1 i) cfd wfd)
-                                  (if (= 2 i) cfd efd)))
-                      ((null? l)
-                          (if (= 0 i)
-                              (loop rtn 1 pwf wfds '() cfd wfd efd)
-                              (if (= 1 i)
-                                  (loop rtn 2 pef afds '() rfd cfd efd)
-                                  (begin
-                                      (##raw#fdset-free prf)
-                                      (##raw#fdset-free pwf)
-                                      (##raw#fdset-free pef)
-                                      (raw-error
-                                          '##raw#select
-                                          #t
-                                          "extra fds"
-                                          rtn ret afds wfds rfd wfd cfd)))))
-                      ((##raw#fdset-test f (car l))
-                          (loop (- rtn 1) i f (cdr l) (cons (car l) cfd)
-                                rfd wfd efd))
-                      (else
-                          (loop rtn i f (cdr l) cfd rfd wfd efd)))))))
 
 
 ;;; scheme interface
@@ -564,15 +488,12 @@ SELECTPROC
 ;;; variables
 
 (define fd-count      0)                     ; total number of fds
-(define fd-max        -1)                    ; highest numbered fd
-(define fd-table      (make-hash-table =))   ; raw-socket objs
 (define fd-list       '())                   ; list with all fds
-(define fd-wlist      '())                   ; list with fds for writing
 
 
 ;;; raw-socket structure
-;;; 1  2     3   4     5     6       7       8     
-;;; fd iface mtu flags open? recvers wready? wqueue 
+;;; 1  2     3   4     5     6       7      8      9       10     11
+;;; fd iface mtu flags open? recvers wqueue rmutex rthread wmutex wthread
 
 ;; inline slot accessors and modifiers
 (define-inline (##raw#fd d)           (##sys#slot d 1))
@@ -581,145 +502,101 @@ SELECTPROC
 (define-inline (##raw#flags d)        (##sys#slot d 4))
 (define-inline (##raw#open? d)        (##sys#slot d 5))
 (define-inline (##raw#recvers d)      (##sys#slot d 6))
-(define-inline (##raw#wready? d)      (##sys#slot d 7))
-(define-inline (##raw#wqueue d)       (##sys#slot d 8))
+(define-inline (##raw#wqueue d)       (##sys#slot d 7))
+(define-inline (##raw#rmutex d)       (##sys#slot d 8))
+(define-inline (##raw#rthread d)      (##sys#slot d 9))
+(define-inline (##raw#wmutex d)       (##sys#slot d 10))
+(define-inline (##raw#wthread d)      (##sys#slot d 11))
 
 (define-inline (##raw#trecvers d)     (map car (##raw#recvers d)))
 (define-inline (##raw#ewqueue? d)     (queue-empty? (##raw#wqueue d)))
 
 (define-inline (##raw#open! d v)      (##sys#setslot d 5 v))
-(define-inline (##raw#wready! d v)    (##sys#setslot d 7 v))
 
 (define-inline (##raw#urecvers! d t p)
-    (##sys#setslot d 6
-        (let loop ((l   (##raw#recvers d)))
-            (cond ((null? l)           (list (cons t p)))
-                  ((eq? t (caar l))    (cons (cons t p) (cdr l)))
-                  (else                (cons (car l) (loop (cdr l))))))))
+    (raw-protect (##raw#rmutex d)
+        (##sys#setslot d 6
+            (let loop ((l   (##raw#recvers d)))
+                (cond ((null? l)           (list (cons t p)))
+                      ((eq? t (caar l))    (cons (cons t p) (cdr l)))
+                      (else                (cons (car l) (loop (cdr l)))))))
+        (thread-resume! (##raw#rthread d))))
 
 (define-inline (##raw#drecvers! d t)
-    (##sys#setslot d 6
-        (let loop ((l   (##raw#recvers d)))
-            (cond ((null? l)           l)
-                  ((eq? t (caar l))    (cdr l))
-                  (else                (cons (car l) (loop (cdr l))))))))
+    (raw-protect (##raw#rmutex d)
+        (##sys#setslot d 6
+            (let loop ((l   (##raw#recvers d)))
+                (cond ((null? l)           l)
+                      ((eq? t (caar l))    (cdr l))
+                      (else                (cons (car l) (loop (cdr l)))))))
+        (and (null? (##raw#recvers d))
+             (thread-suspend! (##raw#rthread d)))))
 
 (define-inline (##raw#awqueue! d v)
-    (if (##raw#wready? d)
-        (begin
-            (##raw#wready! d #f)
-            (##raw#send (##raw#fd d) v (u8vector-length v))
-            (set! fd-wlist (cons (##raw#fd d) fd-wlist)))
+    (raw-protect (list (##raw#rmutex d) (##raw#wmutex d))
         (queue-add! (##raw#wqueue d) v)))
 
-(define-inline (##raw#pwqueue! d)
-    (let loop ((d   d))
-        (if (##raw#ewqueue? d)
-            (##raw#wready! d #t)
-            (let* ((t   (queue-remove! (##raw#wqueue d)))
-                   (n   (##raw#send (##raw#fd d) t (u8vector-length t))))
-                (if (= n 0)
-                    (begin
-                        (queue-push-back! (##raw#wqueue d) t)
-                        (##raw#wready! d #f))
-                    (loop d))))))
 
+;;; threads
 
-;;; thread select handling
+(define (debug-display t . a)
+    (display (apply conc "debug:  " (thread-name t) " - " a))
+    (newline))
 
-;; reset fd-wlist after select and handling
-(define-inline (##raw#select-resetw)
-    (let loop ((l   fd-list)
-               (r   '()))
-        (cond ((null? l)
-                  (set! fd-wlist r))
-              ((##raw#wready? (hash-table-ref fd-table (car l)))
-                  (loop (cdr l) r))
-              (else
-                  (loop (cdr l) (cons (car l) r))))))
+;; create a writing thread thunk
+(define-inline (##raw#thread-write d)
+    (let ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
+          (wq   (##raw#wqueue d))
+          (fd   (##raw#fd d)))
+        (lambda ()
+            (debug-display (current-thread) "started thread-write")
+            (let loop ((c   (current-thread))
+                       (y   #f))
+                (debug-display c "started write loop")
+                (if (##raw#ewqueue? d)
+                    (if (thread-specific c)
+                        (loop c (thread-yield!))
+                        (debug-display c "thread-specific empty"))
+                    (let* ((t   (raw-protect mx (queue-remove! wq)))
+                           (n   (##raw#send fd t (u8vector-length t) mx)))
+                        (if (= 0 n)
+                            (if (thread-specific c)
+                                (begin
+                                    (raw-protect mx (queue-push-back! wq t))
+                                    (loop c (thread-yield!)))
+                                (begin
+                                    (debug-display c "thread-specific 0 end")
+                                (raw-protect mx (queue-push-back! wq t))))
+                            (if (thread-specific c)
+                                (loop c (debug-display c "write successful " n))
+                                (debug-display c "thread-specific end")))))))))
 
-;; helper function for writing
-(define-inline (##raw#select-helper-write fds)
-    (display "debug: select write called\n")
-    (for-each
-        (lambda (x)
-            (##raw#pwqueue! (hash-table-ref fd-table x)))
-        fds)
-    (##raw#select-resetw))
-
-;; helper function for reading
-(define-inline (##raw#select-helper-read fds)
-    (display "debug: select read called\n")
-    (for-each
-        (lambda (x)
-            (let* ((d   (hash-table-ref fd-table x))
-                   (f   (##raw#fd d))
-                   (m   (##raw#mtu d))
-                   (p   (make-u8vector m 0)))
-                (let loop ((r   (##raw#receive f p m))
-                           (t   100))
-                    (if (= 0 r)
-                        #t
-                        (let ((u   (subu8vector p 0 r)))
-                            (for-each
-                                (lambda (recver)
-                                    ((cdr recver) u r))
-                                (##raw#recvers d))
-                            (if (= 0 t)
-                                #t
-                                (loop (##raw#receive f p m) (- t 1))))))))
-        fds))
-
-;; helper function for exceptions
-(define-inline (##raw#select-helper-excp fds)
-    (display "debug: select excp called\n")
-    (if (null? fds)
-        #t
-        (begin
-            (for-each
-                (lambda (x)
-                    (let* ((d   (hash-table-ref fd-table x))
-                           (f   (##raw#fd d)))
-                        (##raw#open! d #f)
-                        (##raw#promisc-off f
-                                           (##raw#iface d)
-                                           (string-length (##raw#iface d))
-                                           (##raw#flags d))
-                        (##raw#close f)
-                        (set! fd-list (delete f fd-list =))
-                        (set! fd-wlist (delete f fd-wlist =))
-                        (hash-table-delete! fd-table f)))
-                fds)
-            (set! fd-count (- fd-count (length fds)))
-            (set! fd-max (+ 1 (fold (lambda (x r) (max x r)) -2 fds)))
-            (if (= 0 fd-count)
-                (let ((tid   thread-id))
-                    (set! thread-id #f)
-                    (mutex-unlock! mutex-id)
-                    (thread-quantum-set! ##sys#primordial-thread 10000)
-                    (thread-terminate! tid))))))
-
-;; handle select, reading and writing
-(define (##raw#select-handler)
-    (let loop ((t   0))
-        (display "debug: loop entered\n")
-        (mutex-lock! mutex-id)
-        (display "debug: select-handler locked\n")
-        (let ((ret   (##raw#select fd-list fd-wlist)))
-            (display (conc "debug:   ret: " ret "\n"))
-            (if (= 0 (vector-ref ret 0))
-                (display "debug: nothing selected\n")
-                (let ((e   (vector-ref ret 3)))
-                    (##raw#select-helper-excp e)
-                    (##raw#select-helper-read
-                        (filter (lambda (x) (not (memq x e))) (vector-ref ret 1)))
-                    (##raw#select-helper-write
-                        (filter (lambda (x) (not (memq x e))) (vector-ref ret 2)))))
-            (mutex-unlock! mutex-id)
-            (display "debug: thread yielding\n")
-            (thread-yield!)
-            (display "debug: thread resuming\n")
-            (loop 0))))
+;; create a reading thread thunk
+(define-inline (##raw#thread-read d)
+    (let ((fd   (##raw#fd d))
+          (m    (##raw#mtu d))
+          (p    (make-u8vector (##raw#mtu d) 0))
+          (mx   (##raw#rmutex d)))
+        (lambda ()
+            (debug-display (current-thread) "started thread-read")
+            (let loop ((c   (current-thread))
+                       (r   (##raw#receive fd p m mx)))
+                (debug-display c "started read loop")
+                (if (= 0 r)
+                    (if (thread-specific c)
+                        (begin
+                            (thread-yield!)
+                            (loop c (##raw#receive fd p m mx)))
+                        (debug-display c "thread-specific noin")) 
+                    (let ((u   (subu8vector p 0 r)))
+                        (for-each
+                            (lambda (recver)
+                                (raw-protect mx ((cdr recver) u r)))
+                            (##raw#recvers d))
+                        (debug-display c "read successful\n" u)
+                        (if (thread-specific c)
+                            (loop c (##raw#receive fd p m mx))
+                            (debug-display c "thread-specific end"))))))))
 
 
 ;;; opening and querying raw sockets
@@ -750,7 +627,6 @@ SELECTPROC
         (raw-error 'open-raw-socket #f "iface must be a non-null string" iface))
     (or (< (string-length iface) _isize)
         (raw-error 'open-raw-socket #f "iface length >= IFNAMSIZ" _isize))
-    (mutex-lock! mutex-id)
     (let* ((len     (string-length iface))
            (fd      (##raw#socket))
            (mtu     (##raw#getmtu fd iface len))
@@ -758,21 +634,23 @@ SELECTPROC
            (opts    (##raw#sockopts fd))
            (flags   (##raw#promisc-on fd iface len))
            (s       (##sys#make-structure 'raw-socket
-                                          fd iface mtu flags #t '() #f
-                                          (make-queue))))
-        (hash-table-set! fd-table fd s)
+                                          fd iface mtu flags #t
+                                          '() (make-queue)
+                                          (make-mutex) #f
+                                          (make-mutex) #f))
+           (rth     (make-thread (##raw#thread-read s)
+                                 (string->symbol (conc "thr-read-" fd))))
+           (wth     (make-thread (##raw#thread-write s)
+                                 (string->symbol (conc "thr-write-" fd)))))
+        (##sys#setslot s 9 rth)
+        (##sys#setslot s 11 wth)
+        (thread-quantum-set! rth 1000)
+        (thread-quantum-set! wth 1000)
         (set! fd-count (+ 1 fd-count))
-        (and (<= fd-max fd)
-             (set! fd-max (+ 1 fd)))
         (set! fd-list (cons fd fd-list))
-        (set! fd-wlist (cons fd fd-wlist))
-        (or thread-id
-            (begin
-                (set! thread-id (make-thread ##raw#select-handler))
-                (thread-quantum-set! thread-id 1000)
-                (thread-quantum-set! (current-thread) 1000)
-                (thread-start! thread-id)))
-        (mutex-unlock! mutex-id)
+        (thread-start! rth)
+        (thread-suspend! rth)
+        (thread-start! wth)
         s))
 
 
@@ -798,15 +676,30 @@ SELECTPROC
     (check-raw-socket 'raw-socket-flags s)
     (##raw#flags s))
 
-;; get the ready status
-(define (raw-socket-wready? s)
-    (check-raw-socket 'raw-socket-wready? s)
-    (##raw#wready? s))
-
 ;; get the write queue
 (define (raw-socket-wqueue s)
     (check-raw-socket 'raw-socket-wqueue s)
     (##raw#wqueue s))
+
+;; get the read mutex
+(define (raw-socket-rmutex s)
+    (check-raw-socket 'raw-socket-rmutex s)
+    (##raw#rmutex s))
+
+;; get the read thread
+(define (raw-socket-rthread s)
+    (check-raw-socket 'raw-socket-rthread s)
+    (##raw#rthread s))
+
+;; get the write mutex
+(define (raw-socket-wmutex s)
+    (check-raw-socket 'raw-socket-wmutex s)
+    (##raw#wmutex s))
+
+;; get the write thread
+(define (raw-socket-wthread s)
+    (check-raw-socket 'raw-socket-wthread s)
+    (##raw#wthread s))
 
 
 ;;; writing to a packet socket
@@ -817,9 +710,7 @@ SELECTPROC
     (or (u8vector? pkt)
         (raw-error 'raw-socket-send #f (conc "pkt is not a u8vector: " pkt)
                    s pkt))
-    (mutex-lock! mutex-id)
-    (##raw#awqueue! s pkt)
-    (mutex-unlock! mutex-id))
+    (##raw#awqueue! s pkt))
 
 
 ;;; reading from a packet socket
@@ -835,9 +726,7 @@ SELECTPROC
              (= 3 (length (procedure-information proc))))
         (raw-error 'raw-socket-add-recver #f
                    (conc "not a handler procedure: " proc) s lbl proc))
-    (mutex-lock! mutex-id)
-    (##raw#urecvers! s lbl proc)
-    (mutex-unlock! mutex-id))
+    (##raw#urecvers! s lbl proc))
 
 ;; remove a recver procedure
 (define (raw-socket-del-recver s lbl)
@@ -845,9 +734,7 @@ SELECTPROC
     (or (symbol? lbl)
         (raw-error 'raw-socket-del-recver #f
                    (conc "label is not a symbol: " lbl) s lbl))
-    (mutex-lock! mutex-id)
-    (##raw#drecvers! s lbl)
-    (mutex-unlock! mutex-id))
+    (##raw#drecvers! s lbl))
 
 ;; list recvers
 (define (raw-socket-recvers s)
@@ -860,22 +747,17 @@ SELECTPROC
 ;; close a raw-socket
 (define (close-raw-socket s)
     (check-raw-socket 'close-raw-socket s)
-    (mutex-lock! mutex-id)
-    (let ((fd      (##raw#fd s)))
-        (##raw#promisc-off fd (##raw#iface s) (string-length (##raw#iface s))
-                           (##raw#flags s))
-        (##raw#close fd)
-        (##raw#open! s #f)
-        (set! fd-list (delete fd fd-list =))
-        (set! fd-wlist (delete fd fd-wlist =))
-        (hash-table-delete! fd-table fd)
-        (set! fd-max (+ 1 (fold (lambda (x r) (max x r)) -2 fd-list)))
-        (set! fd-count (- fd-count 1)))
-    (if (= 0 fd-count)
-        (begin
-              (thread-terminate! thread-id)
-              (thread-quantum-set! (current-thread) 10000)
-              (set! thread-id #f)))
-    (mutex-unlock! mutex-id)
+    (raw-mutex-error s)
+    (let ((mx   (list (##raw#rmutex s) (##raw#wmutex s)))
+          (fd   (##raw#fd s)))
+        (raw-protect mx
+            (##raw#promisc-off fd (##raw#iface s)
+                               (string-length (##raw#iface s))
+                               (##raw#flags s)
+                               mx)
+            (##raw#close fd)
+            (##raw#open! s #f)
+            (set! fd-list (delete fd fd-list =))
+            (set! fd-count (- fd-count 1))))
     #t)
 
