@@ -14,7 +14,7 @@
 
 
 
-(compile raw-sockets-experimental.scm -O3 -s -G -E -d1 -profile)
+(compile raw-sockets-experimental.scm -O2 -s -G -E -profile)
 
 (install-extension 'raw-sockets-experimental
                    '("raw-sockets-experimental.so"
