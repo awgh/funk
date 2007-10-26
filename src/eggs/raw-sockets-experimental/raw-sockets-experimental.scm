@@ -696,6 +696,7 @@ SELECTPROC
                 (let ((tid   thread-id))
                     (set! thread-id #f)
                     (mutex-unlock! mutex-id)
+                    (thread-quantum-set! ##sys#primordial-thread 10000)
                     (thread-terminate! tid))))))
 
 ;; handle select, reading and writing
@@ -768,6 +769,8 @@ SELECTPROC
         (or thread-id
             (begin
                 (set! thread-id (make-thread ##raw#select-handler))
+                (thread-quantum-set! thread-id 1000)
+                (thread-quantum-set! (current-thread) 1000)
                 (thread-start! thread-id)))
         (mutex-unlock! mutex-id)
         s))
@@ -871,6 +874,7 @@ SELECTPROC
     (if (= 0 fd-count)
         (begin
               (thread-terminate! thread-id)
+              (thread-quantum-set! (current-thread) 10000)
               (set! thread-id #f)))
     (mutex-unlock! mutex-id)
     #t)
