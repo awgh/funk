@@ -212,7 +212,8 @@
                                (thread-specific-set! wthr #f)
                                (thread-specific-set! rthr #f)
                                (thread-join! wthr)
-                               (thread-join! rthr)
+                               (or (eq? 'suspended (thread-state rthr))
+                                   (thread-join! rthr))
                                (mutex-unlock! (##sys#slot ml 8))
                                (mutex-unlock! (##sys#slot ml 10))))))
             
