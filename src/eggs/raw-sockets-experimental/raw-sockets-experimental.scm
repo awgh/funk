@@ -24,7 +24,7 @@
 (require-extension srfi-1)     ; list library
 (require-extension srfi-4)     ; homogenous numeric vectors
 (require-extension srfi-13)    ; string library
-(require-extension srfi-18)    ; threads
+(require-extension srfi-18)    ; multithreading support
 
 
 ;;; chicken compile-time options
@@ -33,39 +33,34 @@
     (declare
         (uses library extras posix srfi-1 srfi-4 srfi-13 srfi-18)
         (always-bound
-            errno
-            h_errno
-            _sdomain   ; socket domain
-            _stype     ; socket type
-            _sproto    ; socket protocol
-            _isize     ; IFNAMSIZ
-            sigio-orig
-            sigio-inst
+            rerrno
             thread-id
+            mutex-id
+            _isize
             fd-count
             fd-max
             fd-table
-            fd-vec
             fd-list
-            fd-srvec
-            fd-swvec
-            fd-swind
+            fd-wlist
             )
         (bound-to-procedure
-            ##raw#strerror
+            ##raw#strerr
+            raw-error
+            raw-errno
+            ##raw#close
+            ##raw#socket
             ##raw#bind
             ##raw#getmtu
             ##raw#promisc-on
             ##raw#promisc-off
-            ##raw#async
-            ##raw#socket
-            ##raw#close
             ##raw#send
             ##raw#receive
+            ##raw#fdset-new
+            ##raw#fdset-add
+            ##raw#fdset-test
+            ##raw#fdset-free
+            ##raw#select-prim
             ##raw#select
-            raw-error
-            raw-errno
-            raw-syscall
             ##raw#fd
             ##raw#iface
             ##raw#mtu
@@ -82,18 +77,15 @@
             ##raw#drecvers!
             ##raw#awqueue!
             ##raw#pwqueue!
-            ##raw#sigio-resetw
-            ##raw#sigio-resetr
-            ##raw#sigio-helper-write
-            ##raw#sigio-helper-read
-            ##raw#sigio-handler
+            ##raw#select-resetw
+            ##raw#select-helper-write
+            ##raw#select-helper-read
+            ##raw#select-helper-excp
+            ##raw#select-handler
             raw-socket?
             raw-socket-open?
             check-raw-socket
             open-raw-socket
-            raw-socket-domain
-            raw-socket-type
-            raw-socket-protocol
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
@@ -119,9 +111,6 @@
             ##raw#ewqueue?
             raw-socket?
             raw-socket-open?
-            raw-socket-domain
-            raw-socket-type
-            raw-socket-protocol
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
@@ -134,9 +123,6 @@
             open-raw-socket
             raw-socket?
             raw-socket-open?
-            raw-socket-domain
-            raw-socket-type
-            raw-socket-protocol
             raw-socket-fd
             raw-socket-iface
             raw-socket-mtu
@@ -150,7 +136,6 @@
             close-raw-socket
             )
         (emit-exports "raw-sockets-experimental.exports")
-        (import "srfi-4" "srfi-66")
         (fixnum-arithmetic)
         (lambda-lift)
         (inline)
@@ -196,236 +181,22 @@
 <#
 
 
-;;; C error handling
-
-(define-foreign-variable errno int "errno")
-(define-foreign-variable h_errno int "h_errno")
-
-(define ##raw#strerror
-    (foreign-lambda c-string "strerror" int))
-
-
-;;; target-specific compilation
-
-(cond-expand
-    (linux
-        ;; bind the socket
-        (define ##raw#bind
-            (foreign-lambda* int ((int fd) (c-string iface) (int l))
-#<<BINDFUNC
-                struct sockaddr_ll saddr;
-                struct ifreq ireq;
-                bzero(&ireq, sizeof(struct ifreq));
-                bzero(&saddr, sizeof(struct sockaddr_ll));
-                strncpy(ireq.ifr_name, iface, l);
-                ireq.ifr_name[l] = '\0';
-                if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {
-                    return(-1);
-                }
-                saddr.sll_ifindex = ireq.ifr_ifindex;
-                saddr.sll_family = AF_PACKET;
-                saddr.sll_protocol = htons(ETH_P_ALL);
-                return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
-BINDFUNC
-            ))
-        (define-foreign-variable _sdomain int "PF_PACKET")
-        (define-foreign-variable _stype   int "SOCK_RAW")
-        (define-foreign-variable _sproto  int "htons(ETH_P_ALL)")
-        (define-foreign-variable _isize   int "IFNAMSIZ")
-    )
-    (macosx
-        ;; bind the socket
-        (define ##raw#bind
-            (foreign-lambda* int ((int fd) (c-string iface) (int l))
-#<<BINDFUNC
-                struct sockaddr saddr;
-                saddr.sa_len = sizeof(struct sockaddr);
-                saddr.sa_family = AF_NDRV;
-                strncpy(saddr.sa_data, iface, l);
-                saddr.sa_data[l] = '\0';
-                return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
-BINDFUNC
-            ))
-        (define-foreign-variable _sdomain int "AF_NDRV")
-        (define-foreign-variable _stype   int "SOCK_RAW")
-        (define-foreign-variable _sproto  int "0")
-        (define-foreign-variable _isize   int "IFNAMSIZ")
-    )
-    (else
-        (error "raw-sockets only supported for macosx and linux targets."))
-)
-
-
-;;; ioctl/fcntl procedures
-
-;; get the MTU size
-(define ##raw#getmtu
-    (foreign-lambda* int ((int fd) (c-string iface) (int l))
-#<<MTUFUNC
-        struct ifreq ireq;
-        bzero(&ireq, sizeof(struct ifreq));
-        strncpy(ireq.ifr_name, iface, l);
-        ireq.ifr_name[l] = '\0';
-        if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)
-            return(-1);
-        return(MAKEMTU(ireq.ifr_mtu));
-MTUFUNC
-    ))
-
-;; turn on promiscuous mode and return the current IF_FLAGS value
-(define ##raw#promisc-on
-    (foreign-lambda* integer32 ((int fd) (c-string iface) (int l))
-#<<PONFUNC
-        struct ifreq ireq;
-        int ret;
-        bzero(&ireq, sizeof(struct ifreq));
-        strncpy(ireq.ifr_name, iface, l);
-        ireq.ifr_name[l] = '\0';
-        if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)
-            return(-1);
-        ret = ireq.ifr_flags;
-        ireq.ifr_flags = (ret | IFF_PROMISC);
-        if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)
-            return(-1);
-        return(ret);
-PONFUNC
-    ))
-
-;; restore IF_FLAGS promiscuous mode state to original value
-(define ##raw#promisc-off
-    (foreign-lambda* int ((int fd) (c-string iface) (int l) (integer32 promisc))
-#<<POFFFUNC
-        struct ifreq ireq;
-        bzero(&ireq, sizeof(struct ifreq));
-        strncpy(ireq.ifr_name, iface, l);
-        ireq.ifr_name[l] = '\0';
-        ireq.ifr_flags = promisc;
-        return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
-POFFFUNC
-    ))
-
-;; set asynchronous mode
-(define ##raw#async
-    (foreign-lambda* int ((int fd))
-        "int flags;"
-;        "pid_t pgid = 0 - getpid();"
- ;       "if (fcntl(fd, F_SETOWN, pgid) == -1)"
-;        "    return(-1);"
-;        "if (ioctl(fd, SIOCSPGRP, &pgid) == -1)"
-;        "    return(-1);"
-        "if ((flags = fcntl(fd, F_GETFL)) == -1)"
-        "    return(-1);"
-        "flags |= O_NONBLOCK;"
-        "if (fcntl(fd, F_SETFL, flags) == -1)"
-        "    return(-1);"
-;        "flags = 1;"
-;        "if (ioctl(fd, FIOASYNC, &flags) == -1)"
-;        "    return(-1);"
-;        "if (fcntl(fd, F_SETOWN, pgid) == -1)"
-;        "    return(-1);"
-;        "if (ioctl(fd, SIOCSPGRP, &pgid) == -1)"
-;        "    return(-1);"
-;;;        "return(ioctl(fd, FIOASYNC, &flags));"
-        "return(0);"
-;;        "return(fcntl(fd, F_SETFL, flags));"
-    ))
-
-
-;;; syscall bindings
-
-;; create a socket
-(define ##raw#socket
-    (foreign-lambda int "socket" int int int))
-
-;; close a socket
-(define ##raw#close
-    (foreign-lambda int "close" int))
-
-;; send a packet
-(define ##raw#send
-    (foreign-lambda* int ((int fd) (u8vector pkt) (int len))
-#<<SENDFUNC
-        int nleft = len;
-        int nwrit = 0;
-        unsigned char *p = pkt;
-        while (nleft > 0) {
-            nwrit = write(fd, p, nleft);
-            if (nwrit <= 0) {
-                if (errno == EINTR)
-                    nwrit = 0;
-                else
-                    return(-1);
-            }
-            nleft -= nwrit;
-            p += nwrit;
-        }
-        return(0);
-SENDFUNC
-    ))
-
-;; receive a packet
-(define ##raw#receive
-    (foreign-lambda* int ((int fd) (int mtu) (u8vector pkt))
-#<<RECEIVEFUNC
-        int nread;
-        nread = read(fd, pkt, mtu);
-        return(nread);
-RECEIVEFUNC
-    ))
-
-;;; selects fds ready for read/write
-(define ##raw#select
-    (foreign-lambda* int ((int mfd) (u16vector rfr) (u16vector rfw))
-#<<SELECTFUNC
-        fd_set fdsr, fdsw;
-        int i, ret, r, w;
-        struct timeval tv = { 0, 0 };
-        FD_ZERO(&fdsr);
-        FD_ZERO(&fdsw);
-        for (i=0; rfr[i] != 65535; i++)
-            FD_SET(rfr[i], &fdsr);
-        for (i=0; rfw[i] != 65535; i++)
-            FD_SET(rfw[i++], &fdsw);
-        if ((ret = select(mfd, &fdsr, &fdsw, NULL, &tv)) == -1)
-            return(-1);
-        for (i=0, r=0; rfr[i] != 65535; i++) {
-            if (FD_ISSET(rfr[i], &fdsr))
-                rfr[r++] = rfr[i];
-        }
-        for (i=0, w=0; rfw[i] != 65535; i++) {
-            if (FD_ISSET(rfw[i], &fdsw))
-                rfw[w++] = rfw[i];
-        }
-        rfr[r] = 65535;
-        rfw[w] = 65535;
-        return(ret);
-SELECTFUNC
-    ))
-
-
-;;; scheme interface
-
-
-;;; variables
-
-(define thread-id     #f)
-(define sigio-orig    #f)                    ; sigio original value
-(define sigio-inst    #f)                    ; sigio handler installed?
-(define fd-count      0)                     ; total number of fds
-(define fd-max        -1)                    ; max fd val + 1
-(define fd-table      (make-hash-table =))   ; raw-socket objs
-(define fd-vec        (u16vector 65535))     ; vector with all fds
-(define fd-list       '())                   ; list with all fds
-(define fd-srvec      (u16vector 65535))     ; vector with fds to select-read
-(define fd-swvec      (u16vector 65535))     ; vector with fds to select-write
-(define fd-swind      0)                     ; index for fd-swvec
-
-
-
 ;;; error procedures
 
+;; c variables
+(define-foreign-variable rerrno     integer32      "errno")
+
+;; thread variables
+(define thread-id     #f)                    ; thread handle
+(define mutex-id      (make-mutex))          ; mutex handle
+
+;; errno string
+(define ##raw#strerr    (foreign-lambda c-string "strerror" integer32))
+
 ;; signal an error condition
-(define (raw-error pname msg . args)
+(define-inline (raw-error pname m? msg . args)
+    (and m?
+         (mutex-unlock! mutex-id))
     (signal
         (make-composite-condition
             (make-property-condition 'exn
@@ -435,17 +206,328 @@ SELECTFUNC
             (make-property-condition 'raw-socket))))
 
 ;; signal an error condition from a syscall
-(define (raw-errno pname errno msg . args)
-    (apply raw-error pname (string-append msg " - " (##raw#strerror errno)) args))
+(define-inline (raw-errno pname m? e msg . args)
+    (apply raw-error pname m? (string-append msg " - " (##raw#strerr e)) args))
 
 ;; handle syscall calls with error handling and cleanup
-(define-inline (raw-syscall scall cleanup pname msg . margs)
-    (let ((e   errno))
-        (if (= -1 scall)
-            (begin
-                (cleanup)
-                (apply raw-errno pname e msg margs))
-            scall)))
+(define-macro (raw-syscall scall m? cleanup pname msg . margs)
+    `(let* ((r   ,scall)
+            (e   rerrno))
+         (if (= -1 r)
+             (begin
+                 ,@cleanup
+                 (raw-errno ',pname ,m? e ,msg ,@margs))
+             r)))
+
+
+;;; target-specific compilation
+
+;; maximum interface name length
+(define-foreign-variable _isize     int      "IFNAMSIZ")
+
+;; close a socket
+(define ##raw#close
+    (foreign-lambda int "close" integer32))
+
+;; only linux and macosx are supported.
+;; this handles creating procedures for where they differ.
+(cond-expand
+    (linux
+        ;; make the socket
+        (define-inline (##raw#socket)
+            (raw-syscall
+                ((foreign-lambda* integer32 ()
+                    "return((socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))));"
+                    ))
+                #t
+                ()
+                ##raw#socket
+                "open-raw-socket: could not open socket"))
+        ;; bind the socket
+        (define-inline (##raw#bind fd iface len)
+            (raw-syscall
+                ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
+#<<BINDFUNC
+                    struct sockaddr_ll saddr;
+                    struct ifreq ireq;
+                    bzero(&ireq, sizeof(struct ifreq));
+                    bzero(&saddr, sizeof(struct sockaddr_ll));
+                    strncpy(ireq.ifr_name, iface, l);
+                    ireq.ifr_name[l] = '\0';
+                    if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {
+                        return(-1);
+                    }
+                    saddr.sll_ifindex = ireq.ifr_ifindex;
+                    saddr.sll_family = AF_PACKET;
+                    saddr.sll_protocol = htons(ETH_P_ALL);
+                    return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
+BINDFUNC
+                    ) fd iface len)
+                #t
+                ((##raw#close fd))
+                ##raw#bind
+                "open-raw-socket: could not bind socket"
+                fd iface len))
+    )
+    (macosx
+        ;; make the socket
+        (define-inline (##raw#socket)
+            (raw-syscall
+                ((foreign-lambda* integer32 ()
+                    "return((socket(AF_NDRV, SOCK_RAW, 0)));"
+                    ))
+                #t
+                ()
+                ##raw#socket
+                "open-raw-socket: could not open socket"))
+        ;; bind the socket
+        (define-inline (##raw#bind fd iface len)
+            (raw-syscall
+                ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
+#<<BINDFUNC
+                    struct sockaddr saddr;
+                    saddr.sa_len = sizeof(struct sockaddr);
+                    saddr.sa_family = AF_NDRV;
+                    strncpy(saddr.sa_data, iface, l);
+                    saddr.sa_data[l] = '\0';
+                    return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
+BINDFUNC
+                    ) fd iface len)
+                #t
+                ((##raw#close fd))
+                ##raw#bind
+                "open-raw-socket: could not bind socket"
+                fd iface len))
+    )
+    (else
+        (error "raw-sockets only supported for macosx and linux targets."))
+)
+
+
+;;; ioctl/fcntl procedures
+
+;; get the MTU size
+(define-inline (##raw#getmtu fd iface len)
+    (raw-syscall
+        ((foreign-lambda* integer32 ((integer32 fd) (c-string iface) (int l))
+#<<MTUPROC
+            struct ifreq ireq;
+            int ret;
+            bzero(&ireq, sizeof(struct ifreq));
+            strncpy(ireq.ifr_name, iface, l);
+            ireq.ifr_name[l] = '\0';
+            if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)
+                return(-1);
+            return((MAKEMTU(ireq.ifr_mtu)));
+MTUPROC
+                ) fd iface len)
+        #t
+        ((##raw#close fd))
+        ##raw#getmtu
+        "open-raw-socket: could not get MTU size"
+        fd iface len))
+
+;; turn on promiscuous mode and return the current IF_FLAGS value
+(define-inline (##raw#promisc-on fd iface len)
+    (raw-syscall
+        ((foreign-lambda* integer32 ((integer32 fd) (c-string iface) (int l))
+#<<PONFUNC
+            struct ifreq ireq;
+            int ret;
+            bzero(&ireq, sizeof(struct ifreq));
+            strncpy(ireq.ifr_name, iface, l);
+            ireq.ifr_name[l] = '\0';
+            if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)
+                return(-1);
+            ret = ireq.ifr_flags;
+            ireq.ifr_flags |= IFF_PROMISC;
+            if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)
+                return(-1);
+            return(ret);
+PONFUNC
+            ) fd iface len)
+        #t
+        ((##raw#close fd))
+        ##raw#promisc-on
+        "open-raw-socket: could not set promiscuous mode"
+        fd iface len))
+
+;; restore IF_FLAGS promiscuous mode state to original value
+(define-inline (##raw#promisc-off fd iface len promisc)
+    (raw-syscall
+        ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l) (integer32 promisc))
+#<<POFFFUNC
+            struct ifreq ireq;
+            bzero(&ireq, sizeof(struct ifreq));
+            strncpy(ireq.ifr_name, iface, l);
+            ireq.ifr_name[l] = '\0';
+            ireq.ifr_flags = promisc;
+            return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
+POFFFUNC
+            ) fd iface len promisc)
+        #t
+        ((##raw#close fd))
+        ##raw#promisc-off
+        "open-raw-socket: could not reset promiscuous mode"
+        fd iface len promisc))
+
+
+;;; syscall bindings
+
+;; send a packet
+(define-inline (##raw#send fd pkt len)
+    (raw-syscall
+        ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int len))
+#<<SENDFUNC
+            int nleft = len;
+            int nwrit = 0;
+            unsigned char *p = pkt;
+            while (nleft > 0) {
+                nwrit = write(fd, p, nleft);
+                if (nwrit <= 0) {
+                    if (errno == EINTR)
+                        nwrit = 0;
+                    else
+                        return(-1);
+                }
+                nleft -= nwrit;
+                p += nwrit;
+            }
+            return(0);
+SENDFUNC
+            ) fd pkt len)
+        #t
+        ()
+        ##raw#send
+        "raw-socket-send: could not send packet"
+        fd pkt len))
+
+;; receive a packet
+(define-inline (##raw#receive fd pkt len)
+    (raw-syscall
+        ((foreign-lambda integer32 "read" integer32 u8vector integer32)
+            fd pkt len)
+        #t
+        ()
+        ##raw#receive
+        "raw-socket-recvers: could not read from socket"
+        fd pkt len))
+
+;; select auxilliary procedure: create and zero a FD_SET
+(define-inline (##raw#fdset-new)
+    (raw-syscall
+        ((foreign-lambda* c-pointer ()
+#<<FDNEWPROC
+            fd_set *ret = (fd_set *)malloc(sizeof(fd_set));
+            return(((ret == NULL) ? -1 : ret));
+FDNEWPROC
+            ))
+        #t
+        ()
+        ##raw#fdset-new
+        "##raw#select: could not create fd_set"))
+
+;; select auxilliary procedure: add a fd to a FD_SET
+(define ##raw#fdset-add
+    (foreign-lambda* void ((c-pointer fds) (integer32 fd))
+        "FD_SET(fd, (fd_set *)fds);"
+    ))
+
+;; select auxilliary procedure: check if a fd is a member of a FD_SET
+(define-inline (##raw#fdset-test fds fd)
+    (= 1 ((foreign-lambda* int ((c-pointer fds) (integer32 fd))
+             "return((FD_ISSET(fd, (fd_set *)fds)));"
+             ) fds fd)))
+
+;; select auxilliary procedure: free a FD_SET
+(define ##raw#fdset-free
+    (foreign-lambda* void ((c-pointer fds))
+        "free((fd_set *)fds);"
+    ))
+
+;; select auxilliary procedure: call select
+(define-inline (##raw#select-prim mfd rfds wfds efds)
+    (raw-syscall
+        ((foreign-lambda* integer32 ((integer32 mfd) 
+                                     (c-pointer rfds)
+                                     (c-pointer wfds)
+                                     (c-pointer efds))
+#<<SELECTPROC
+            struct timeval tv = { 0L, 20000L };
+            return((select(mfd, (fd_set *)rfds, (fd_set *)wfds,
+                           (fd_set *)efds, &tv)));
+SELECTPROC
+            ) mfd rfds wfds efds)
+        #t
+        ((##raw#fdset-free rfds)
+         (##raw#fdset-free wfds)
+         (##raw#fdset-free efds))
+        ##raw#select-prim
+        "##raw#select: select() call failed"
+        mfd rfds wfds efds))
+
+;; selects fds ready for read/write/error
+(define-inline (##raw#select afds wfds)
+    (let ((prf   (##raw#fdset-new))
+          (pwf   (##raw#fdset-new))
+          (pef   (##raw#fdset-new)))
+        (for-each
+            (lambda (x)
+                (##raw#fdset-add prf x)
+                (##raw#fdset-add pef x))
+            afds)
+        (for-each
+            (lambda (x)
+                (##raw#fdset-add pwf x))
+            wfds)
+        (let ((ret   (##raw#select-prim fd-max prf pwf pef)))
+            (let loop ((rtn   ret)
+                       (i     0)
+                       (f     prf)
+                       (l     afds)
+                       (cfd   '())
+                       (rfd   '())
+                       (wfd   '())
+                       (efd   '()))
+                (cond ((= 0 rtn)
+                          (##raw#fdset-free prf)
+                          (##raw#fdset-free pwf)
+                          (##raw#fdset-free pef)
+                          (vector ret
+                                  (if (= 0 i) cfd rfd)
+                                  (if (= 1 i) cfd wfd)
+                                  (if (= 2 i) cfd efd)))
+                      ((null? l)
+                          (if (= 0 i)
+                              (loop rtn 1 pwf wfds '() cfd wfd efd)
+                              (if (= 1 i)
+                                  (loop rtn 2 pef afds '() rfd cfd efd)
+                                  (begin
+                                      (##raw#fdset-free prf)
+                                      (##raw#fdset-free pwf)
+                                      (##raw#fdset-free pef)
+                                      (raw-error
+                                          '##raw#select
+                                          #t
+                                          "extra fds"
+                                          rtn ret afds wfds rfd wfd cfd)))))
+                      ((##raw#fdset-test f (car l))
+                          (loop (- rtn 1) i f (cdr l) (cons (car l) cfd)
+                                rfd wfd efd))
+                      (else
+                          (loop rtn i f (cdr l) cfd rfd wfd efd)))))))
+
+
+;;; scheme interface
+
+
+;;; variables
+
+(define fd-count      0)                     ; total number of fds
+(define fd-max        -1)                    ; highest numbered fd
+(define fd-table      (make-hash-table =))   ; raw-socket objs
+(define fd-list       '())                   ; list with all fds
+(define fd-wlist      '())                   ; list with fds for writing
 
 
 ;;; raw-socket structure
@@ -487,9 +569,7 @@ SELECTFUNC
         (begin
             (##raw#wready! d #f)
             (##raw#send (##raw#fd d) v (u8vector-length v))
-            (u16vector-set! fd-swvec fd-swind (##raw#fd d))
-            (set! fd-swind (+ 1 fd-swind))
-            (u16vector-set! fd-swvec fd-swind 65535))
+            (set! fd-wlist (cons (##raw#fd d) fd-wlist)))
         (queue-add! (##raw#wqueue d) v)))
 
 (define-inline (##raw#pwqueue! d)
@@ -500,77 +580,92 @@ SELECTFUNC
             (##raw#send (##raw#fd d) t (u8vector-length t)))))
 
 
-;;; SIGIO handling
+;;; thread select handling
 
-;; reset fd-swvec after select and handling
-(define-inline (##raw#sigio-resetw)
-    (let loop ((i    0)
-               (j    1)
-               (fd   (u16vector-ref fd-vec 0)))
-        (cond ((= 65535 fd)
-                  (set! fd-swind i)
-                  (u16vector-set! fd-swvec fd-swind 65535))
-              ((##raw#wready? (hash-table-ref fd-table fd))
-                  (loop i (+ 1 j) (u16vector-ref fd-vec j)))
+;; reset fd-wlist after select and handling
+(define-inline (##raw#select-resetw)
+    (let loop ((l   fd-list)
+               (r   '()))
+        (cond ((null? l)
+                  (set! fd-wlist r))
+              ((##raw#wready? (hash-table-ref fd-table (car l)))
+                  (loop (cdr l) r))
               (else
-                  (u16vector-set! fd-swvec i fd)
-                  (loop (+ 1 i) (+ 1 j) (u16vector-ref fd-vec j))))))
-
-;; reset fd-srvec after select and handling
-(define-inline (##raw#sigio-resetr)
-    (for-each
-        (lambda (fd x)
-            (u16vector-set! fd-srvec x fd))
-        (u16vector->list fd-vec) (iota (+ 1 fd-count))))
+                  (loop (cdr l) (cons (car l) r))))))
 
 ;; helper function for writing
-(define-inline (##raw#sigio-helper-write)
-    (let loop ((i     1)
-               (fd    (u16vector-ref fd-swvec 0))
-               (ign   #f))
-        (if (= 65535 fd)
-            (##raw#sigio-resetw)
-            (loop (+ 1 i) (u16vector-ref fd-swvec i)
-                  (##raw#pwqueue! (hash-table-ref fd-table fd))))))
+(define-inline (##raw#select-helper-write fds)
+    (display "debug: select write called\n")
+    (for-each
+        (lambda (x)
+            (##raw#pwqueue! (hash-table-ref fd-table x)))
+        fds)
+    (##raw#select-resetw))
 
 ;; helper function for reading
-(define-inline (##raw#sigio-helper-read)
-    (let loop ((i     1)
-               (fd    (u16vector-ref fd-srvec 0)))
-        (if (= 65535 fd)
-            (##raw#sigio-resetr)
-            (let* ((d   (hash-table-ref fd-table fd))
+(define-inline (##raw#select-helper-read fds)
+    (display "debug: select read called\n")
+    (for-each
+        (lambda (x)
+            (let* ((d   (hash-table-ref fd-table x))
                    (p   (make-u8vector (##raw#mtu d) 0))
-                   (l   (##raw#receive fd (##raw#mtu d) p)))
+                   (r   (##raw#receive (##raw#fd d) p (##raw#mtu d)))
+                   (u   (subu8vector p 0 r)))
                 (for-each
-                    (lambda (r)
-                        ((cdr r) p l))
-                    (##raw#recvers d))
-                (loop (+ 1 i) (u16vector-ref fd-srvec i))))))
+                    (lambda (recver)
+                        ((cdr recver) u r))
+                    (##raw#recvers d))))
+        fds))
 
-;; handle SIGIO
-(define (##raw#sigio-handler)
-;    (signal-mask! signal/io)
-;    (display "signal handler called\n")
-    (let ((rfd   (raw-syscall
-                     (##raw#select fd-max fd-srvec fd-swvec)
-                     (lambda () #t)
-                     '##raw#sigio-handler
-                     "error in select")))
-;        (display (conc "rfd: " rfd "\n"))
-        (if (= 0 rfd)
-            (begin
-                (##raw#sigio-resetr)
-                (##raw#sigio-resetw)
-                (and sigio-orig
-                     (sigio-orig signal/io)))
-            (begin
-                (##raw#sigio-helper-read)
-                (##raw#sigio-helper-write))))
-     (thread-yield!)
-     (##raw#sigio-handler))
-;    (signal-unmask! signal/io)
-;    (set-signal-handler! signal/io ##raw#sigio-handler))
+;; helper function for exceptions
+(define-inline (##raw#select-helper-excp fds)
+    (display "debug: select excp called\n")
+    (if (null? fds)
+        #t
+        (begin
+            (for-each
+                (lambda (x)
+                    (let* ((d   (hash-table-ref fd-table x))
+                           (f   (##raw#fd d)))
+                        (##raw#open! d #f)
+                        (##raw#promisc-off f
+                                           (##raw#iface d)
+                                           (string-length (##raw#iface d))
+                                           (##raw#flags d))
+                        (##raw#close f)
+                        (set! fd-list (delete f fd-list =))
+                        (set! fd-wlist (delete f fd-wlist =))
+                        (hash-table-delete! fd-table f)))
+                fds)
+            (set! fd-count (- fd-count (length fds)))
+            (set! fd-max (+ 1 (fold (lambda (x r) (max x r)) -2 fds)))
+            (if (= 0 fd-count)
+                (let ((tid   thread-id))
+                    (set! thread-id #f)
+                    (mutex-unlock! mutex-id)
+                    (thread-terminate! tid))))))
+
+;; handle select, reading and writing
+(define (##raw#select-handler)
+    (let loop ((t   0))
+        (display "debug: loop entered\n")
+        (mutex-lock! mutex-id)
+        (display "debug: select-handler locked\n")
+        (let ((ret   (##raw#select fd-list fd-wlist)))
+            (display (conc "debug:   ret: " ret "\n"))
+            (if (= 0 (vector-ref ret 0))
+                (display "debug: nothing selected\n")
+                (let ((e   (vector-ref ret 3)))
+                    (##raw#select-helper-excp e)
+                    (##raw#select-helper-read
+                        (filter (lambda (x) (not (memq x e))) (vector-ref ret 1)))
+                    (##raw#select-helper-write
+                        (filter (lambda (x) (not (memq x e))) (vector-ref ret 2)))))
+            (mutex-unlock! mutex-id)
+            (display "debug: thread yielding\n")
+            (thread-yield!)
+            (display "debug: thread resuming\n")
+            (loop 0))))
 
 
 ;;; opening and querying raw sockets
@@ -589,120 +684,71 @@ SELECTFUNC
 (define-inline (check-raw-socket pname s . args)
     (or (and (##core#inline "C_blockp" s)
              (##sys#structure? s 'raw-socket))
-        (apply raw-error pname (conc "not a raw-socket: " s) args))
+        (apply raw-error pname #f (conc "not a raw-socket: " s) args))
+    (or (memq (##raw#fd s) fd-list)
+        (##raw#open! s #f))
     (or (##raw#open? s)
-        (apply raw-error pname "raw-socket is not open" args)))
+        (apply raw-error pname #f "raw-socket is not open" s args)))
 
 ;; open a raw socket
 (define (open-raw-socket iface)
     (or (and (string? iface) (not (string-null? iface)))
-        (raw-error 'open-raw-socket "iface must be a non-null string" iface))
+        (raw-error 'open-raw-socket #f "iface must be a non-null string" iface))
+    (or (< (string-length iface) _isize)
+        (raw-error 'open-raw-socket #f "iface length >= IFNAMSIZ" _isize))
+    (mutex-lock! mutex-id)
     (let* ((len     (string-length iface))
-           (lmax    (or (< len _isize)
-                        (raw-error 'open-raw-socket "len must be < IFNAMSIZ" len)))
-           (fd      (raw-syscall
-                        (##raw#socket _sdomain _stype _sproto)
-                        (lambda () #t)
-                        'open-raw-socket
-                        "could not create socket" iface))
-           (fdmax   (if (= 65535 fd)
-                        (begin
-                            (##raw#close fd)
-                            (raw-error 'open-raw-socket
-                                       "maximum fd number reached" fd iface))
-                        fd))
-           (mtu     (raw-syscall
-                        (##raw#getmtu fd iface len)
-                        (lambda () (##raw#close fd))
-                        'open-raw-socket
-                        "could not get mtu size" iface))
-           (bind    (raw-syscall
-                        (##raw#bind fd iface len)
-                        (lambda () (##raw#close fd))
-                        'open-raw-socket
-                        "could not bind to socket" iface))
-           (async   (raw-syscall
-                        (##raw#async fd)
-                        (lambda () (##raw#close fd))
-                        'open-raw-socket
-                        "could not set asynchronous mode" iface))
-           (flags   (raw-syscall
-                        (##raw#promisc-on fd iface len)
-                        (lambda () (##raw#close fd))
-                        'open-raw-socket
-                        "could not set promiscuous mode" iface))
+           (fd      (##raw#socket))
+           (mtu     (##raw#getmtu fd iface len))
+           (bind    (##raw#bind fd iface len))
+           (flags   (##raw#promisc-on fd iface len))
            (s       (##sys#make-structure 'raw-socket
-                                          fd iface mtu flags #t '() #t
+                                          fd iface mtu flags #t '() #f
                                           (make-queue))))
-;        (or sigio-inst
-            ;(signal-mask! signal/io)
-;            (begin
-;                (set! sigio-inst #t)
-;                (set! sigio-orig (signal-handler signal/io))
-;                (set-signal-handler! signal/io ##raw#sigio-handler)
-;                (signal-mask! signal/io)))
         (hash-table-set! fd-table fd s)
-        (set! fd-max (max fd-max (+ 1 fd)))
         (set! fd-count (+ 1 fd-count))
+        (and (<= fd-max fd)
+             (set! fd-max (+ 1 fd)))
         (set! fd-list (cons fd fd-list))
-        (set! fd-vec (list->u16vector (append fd-list (list 65535))))
-        (set! fd-srvec (make-u16vector (+ 1 fd-count) 65535))
-        (set! fd-swvec (make-u16vector (+ 1 fd-count) 65535))
-        (##raw#sigio-resetr)
-        (##raw#sigio-resetw)
-;        (signal-unmask! signal/io)
-        (or sigio-inst
+        (set! fd-wlist (cons fd fd-wlist))
+        (or thread-id
             (begin
-                (set! sigio-inst (make-thread ##raw#sigio-handler "select"))
-                (thread-start! sigio-inst)))
+                (set! thread-id (make-thread ##raw#select-handler))
+                (thread-start! thread-id)))
+        (mutex-unlock! mutex-id)
         s))
 
 
 ;;; information on a packet socket
 
-;; get the socket domain
-(define (raw-socket-domain s)
-    (check-raw-socket 'raw-socket-domain s s)
-    _sdomain)
-
-;; get the socket type
-(define (raw-socket-type s)
-    (check-raw-socket 'raw-socket-type s s)
-    _stype)
-
-;; get the socket protocol
-(define (raw-socket-protocol s)
-    (check-raw-socket 'raw-socket-protocol s s)
-    _sproto)
-
 ;; get the fd
 (define (raw-socket-fd s)
-    (check-raw-socket 'raw-socket-fd s s)
+    (check-raw-socket 'raw-socket-fd s)
     (##raw#fd s))
 
 ;; get the interface
 (define (raw-socket-iface s)
-    (check-raw-socket 'raw-socket-iface s s)
+    (check-raw-socket 'raw-socket-iface s)
     (##raw#iface s))
 
 ;; get the MTU
 (define (raw-socket-mtu s)
-    (check-raw-socket 'raw-socket-mtu s s)
+    (check-raw-socket 'raw-socket-mtu s)
     (##raw#mtu s))
 
 ;; get the flags
 (define (raw-socket-flags s)
-    (check-raw-socket 'raw-socket-flags s s)
+    (check-raw-socket 'raw-socket-flags s)
     (##raw#flags s))
 
 ;; get the ready status
 (define (raw-socket-wready? s)
-    (check-raw-socket 'raw-socket-wready? s s)
+    (check-raw-socket 'raw-socket-wready? s)
     (##raw#wready? s))
 
 ;; get the write queue
 (define (raw-socket-wqueue s)
-    (check-raw-socket 'raw-socket-wqueue s s)
+    (check-raw-socket 'raw-socket-wqueue s)
     (##raw#wqueue s))
 
 
@@ -710,38 +756,45 @@ SELECTFUNC
 
 ;; write pkt to the socket, or queue if not ready
 (define (raw-socket-send s pkt)
-    (check-raw-socket 'raw-socket-send s s pkt)
+    (check-raw-socket 'raw-socket-send s pkt)
     (or (u8vector? pkt)
-        (raw-error 'raw-socket-send (conc "pkt is not a u8vector: " pkt) s pkt))
-    (##raw#awqueue! s pkt))
+        (raw-error 'raw-socket-send #f (conc "pkt is not a u8vector: " pkt)
+                   s pkt))
+    (mutex-lock! mutex-id)
+    (##raw#awqueue! s pkt)
+    (mutex-unlock! mutex-id))
 
 
 ;;; reading from a packet socket
 
 ;; add a recver procedure
 (define (raw-socket-add-recver s lbl proc)
-    (check-raw-socket 'raw-socket-add-recver s s lbl proc)
+    (check-raw-socket 'raw-socket-add-recver s lbl proc)
     (or (symbol? lbl)
-        (raw-error 'raw-socket-add-recver
+        (raw-error 'raw-socket-add-recver #f
                    (conc "label is not a symbol: " lbl) s lbl proc))
     (or (and (procedure? proc)
              (list? (procedure-information proc))
              (= 3 (length (procedure-information proc))))
-        (raw-error 'raw-socket-add-recver
+        (raw-error 'raw-socket-add-recver #f
                    (conc "not a handler procedure: " proc) s lbl proc))
-    (##raw#urecvers! s lbl proc))
+    (mutex-lock! mutex-id)
+    (##raw#urecvers! s lbl proc)
+    (mutex-unlock! mutex-id))
 
 ;; remove a recver procedure
 (define (raw-socket-del-recver s lbl)
-    (check-raw-socket 'raw-socket-del-recver s s lbl)
+    (check-raw-socket 'raw-socket-del-recver s lbl)
     (or (symbol? lbl)
-        (raw-error 'raw-socket-del-recver
+        (raw-error 'raw-socket-del-recver #f
                    (conc "label is not a symbol: " lbl) s lbl))
-    (##raw#drecvers! s lbl))
+    (mutex-lock! mutex-id)
+    (##raw#drecvers! s lbl)
+    (mutex-unlock! mutex-id))
 
 ;; list recvers
 (define (raw-socket-recvers s)
-    (check-raw-socket 'raw-socket-recvers s s)
+    (check-raw-socket 'raw-socket-recvers s)
     (##raw#recvers s))
 
 
@@ -749,30 +802,22 @@ SELECTFUNC
 
 ;; close a raw-socket
 (define (close-raw-socket s)
-    (check-raw-socket 'close-raw-socket s s)
-;;    (signal-mask! signal/io)
+    (check-raw-socket 'close-raw-socket s)
+    (mutex-lock! mutex-id)
     (let ((fd      (##raw#fd s)))
-        (if (= -1 (##raw#promisc-off fd (##raw#iface s)
-                                     (string-length (##raw#iface s))
-                                     (##raw#flags s)))
-            (display "could not turn off promiscuous mode\n"))
+        (##raw#promisc-off fd (##raw#iface s) (string-length (##raw#iface s))
+                           (##raw#flags s))
         (##raw#close fd)
         (##raw#open! s #f)
+        (set! fd-list (delete fd fd-list =))
+        (set! fd-wlist (delete fd fd-wlist =))
         (hash-table-delete! fd-table fd)
-        (set! fd-list (delete fd fd-list))
-        (set! fd-vec (list->u16vector (append fd-list (list 65535))))
-        (set! fd-srvec (make-u16vector fd-count 65535))
-        (set! fd-swvec (make-u16vector fd-count 65535))
-        (set! fd-count (- fd-count 1))
-        (set! fd-max (fold (lambda (x r) (max (+ 1 x) r)) -1 fd-list))
-        (##raw#sigio-resetr)
-        (##raw#sigio-resetw))
-;;    (signal-unmask! signal/io)
+        (set! fd-max (+ 1 (fold (lambda (x r) (max x r)) -2 fd-list)))
+        (set! fd-count (- fd-count 1)))
     (if (= 0 fd-count)
         (begin
-              (thread-terminate! sigio-inst)
-
-;;            (set-signal-handler! signal/io sigio-orig)
-            (set! sigio-inst #f)))
+              (thread-terminate! thread-id)
+              (set! thread-id #f)))
+    (mutex-unlock! mutex-id)
     #t)
 
