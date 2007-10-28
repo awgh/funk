@@ -40,7 +40,7 @@
 
 (define cthr (current-thread))
 (define sthr (make-thread send-packets))
-(thread-start! mthr)
+(thread-start! sthr)
 (thread-suspend! cthr)
 (close-raw-socket sock)
 
