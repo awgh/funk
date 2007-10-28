@@ -621,6 +621,7 @@
                                     mx
                                     (queue-remove! (##raw#wqueue d))))
                            (n   (##raw#send fd t (u8vector-length t) s mx)))
+                        (debug-display c "writing:" n t)
                         (if (= 0 n)
                             (if (thread-specific c)
                                 (begin
