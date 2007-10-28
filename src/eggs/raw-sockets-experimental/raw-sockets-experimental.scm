@@ -21,6 +21,7 @@
 ;;; chicken library loading
 
 (require-extension posix)      ; POSIX bindings
+(require-extension lolevel)    ; lowlevel interface library
 (require-extension srfi-1)     ; list library
 (require-extension srfi-4)     ; homogenous numeric vectors
 (require-extension srfi-13)    ; string library
@@ -31,10 +32,12 @@
 
 (eval-when (compile)
     (declare
-        (uses library extras posix srfi-1 srfi-4 srfi-13 srfi-18)
+        (uses library extras posix lolevel srfi-1 srfi-4 srfi-13 srfi-18)
         (always-bound
             rerrno
             _isize
+            raw-writestr
+            raw-readstr
             fd-count
             fd-list
             )
@@ -46,6 +49,7 @@
             ##raw#close
             ##raw#socket
             ##raw#bind
+            ##raw#makesaddr
             ##raw#getmtu
             ##raw#promisc-on
             ##raw#promisc-off
@@ -144,8 +148,13 @@
         (run-time-macros)
     ))
 (eval-when (load eval)
-    (eval `(define-macro (raw-protect-region mx b . r)
-              `(raw-protect ,mx ,b ,@r)))
+    (eval `(define-macro (raw-protect-region write? mx b . r)
+              `(raw-protect (cons ,(##sys#slot mx 8)
+                                  (if ,write?
+                                      (list ,(##sys#slot mx 10))
+                                      '()))
+                            ,b
+                            ,@r)))
     )
 
 
@@ -182,9 +191,12 @@
 
 ;;; error procedures
 
-;; c variables
-(define-foreign-variable rerrno     integer32      "errno")
-(define ##raw#strerr    (foreign-lambda c-string "strerror" integer32))
+;; errno
+(define-foreign-variable rerrno     integer32  "errno")
+
+;; error string
+(define ##raw#strerr
+    (foreign-lambda c-string "strerror" integer32))
 
 ;; protected regions
 (define-macro (raw-protect ml . body)
@@ -257,70 +269,100 @@
 (cond-expand
     (linux
         ;; make the socket
-        (define-inline (##raw#socket)
-            (raw-syscall
-                ((foreign-lambda* integer32 ()
-                    "return((socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))));"
-                    ))
-                #f
-                ()
-                ##raw#socket
-                "open-raw-socket: could not open socket"))
+        (let ((s   (foreign-lambda* int ()
+                      "return((socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))));"
+                   )))
+            (define-inline (##raw#socket)
+                (raw-syscall
+                    (s)
+                    #f
+                    ()
+                    ##raw#socket
+                    "open-raw-socket: could not open socket")))
         ;; bind the socket
-        (define-inline (##raw#bind fd iface len)
-            (raw-syscall
-                ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
-#<<BINDPROC
-                    struct sockaddr_ll saddr;
-                    struct ifreq ireq;
-                    bzero(&ireq, sizeof(struct ifreq));
-                    bzero(&saddr, sizeof(struct sockaddr_ll));
-                    strncpy(ireq.ifr_name, iface, l);
-                    ireq.ifr_name[l] = '\0';
-                    if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {
-                        return(-1);
-                    }
-                    saddr.sll_ifindex = ireq.ifr_ifindex;
-                    saddr.sll_family = AF_PACKET;
-                    saddr.sll_protocol = htons(ETH_P_ALL);
-                    return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));
-BINDPROC
-                    ) fd iface len)
-                #f
-                ((##raw#close fd))
-                ##raw#bind
-                "open-raw-socket: could not bind socket"
-                fd iface len))
+        (let ((b   (foreign-lambda* int ((int fd) (c-string iface) (int l))
+                       "struct sockaddr_ll saddr;"
+                       "struct ifreq ireq;"
+                       "bzero(&ireq, sizeof(struct ifreq));"
+                       "bzero(&saddr, sizeof(struct sockaddr_ll));"
+                       "strncpy(ireq.ifr_name, iface, l);"
+                       "ireq.ifr_name[l] = '\\0';"
+                       "if (ioctl(fd, SIOCGIFINDEX, &ireq) == -1) {"
+                       "    return(-1);"
+                       "}"
+                       "saddr.sll_ifindex = ireq.ifr_ifindex;"
+                       "saddr.sll_family = AF_PACKET;"
+                       "saddr.sll_protocol = htons(ETH_P_ALL);"
+                       "return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr_ll))));"
+                   )))
+            (define-inline (##raw#bind fd iface len)
+                (raw-syscall
+                    (b fd iface len)
+                    #f
+                    ((##raw#close fd))
+                    ##raw#bind
+                    "open-raw-socket: could not bind socket"
+                    fd iface len)))
+        ;; make the placeholder for struct sockaddr
+        (define-inline (##raw#makesaddr fd iface len d)    #f)
+        ;; string for the actual write call
+        (define-for-syntax raw-writestr    "write(fd, p, nleft)")
+        ;; string for the actual read call
+        (define-for-syntax raw-readstr     "read(fd, pkt, l)")
     )
     (macosx
         ;; make the socket
-        (define-inline (##raw#socket)
-            (raw-syscall
-                ((foreign-lambda* integer32 ()
-                    "return((socket(AF_NDRV, SOCK_RAW, 0)));"
-                    ))
-                #f
-                ()
-                ##raw#socket
-                "open-raw-socket: could not open socket"))
+        (let ((s   (foreign-lambda* int ()
+                       "return((socket(AF_NDRV, SOCK_RAW, 0)));"
+                   )))
+            (define-inline (##raw#socket)
+                (raw-syscall
+                    (s)
+                    #f
+                    ()
+                    ##raw#socket
+                    "open-raw-socket: could not open socket")))
         ;; bind the socket
-        (define-inline (##raw#bind fd iface len)
-            (raw-syscall
-                ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l))
-#<<BINDPROC
-                    struct sockaddr saddr;
-                    saddr.sa_len = sizeof(struct sockaddr);
-                    saddr.sa_family = AF_NDRV;
-                    strncpy(saddr.sa_data, iface, l);
-                    saddr.sa_data[l] = '\0';
-                    return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));
-BINDPROC
-                    ) fd iface len)
-                #f
-                ((##raw#close fd))
-                ##raw#bind
-                "open-raw-socket: could not bind socket"
-                fd iface len))
+        (let ((b   (foreign-lambda* int ((int fd) (c-string iface) (int l))
+                       "struct sockaddr saddr;"
+                       "saddr.sa_len = sizeof(struct sockaddr);"
+                       "saddr.sa_family = AF_NDRV;"
+                       "strncpy(saddr.sa_data, iface, l);"
+                       "saddr.sa_data[l] = '\\0';"
+                       "return((bind(fd, (struct sockaddr *)(&saddr), sizeof(struct sockaddr))));"
+                   )))
+            (define-inline (##raw#bind fd iface len)
+                (raw-syscall
+                    (b fd iface len)
+                    #f
+                    ((##raw#close fd))
+                    ##raw#bind
+                    "open-raw-socket: could not bind socket"
+                    fd iface len)))
+        ;; make the struct sockaddr
+        (let ((m   (foreign-lambda* c-pointer ((int fd) (c-string iface)
+                                               (int l))
+                       "struct sockaddr *saddr = (struct sockaddr *)malloc(sizeof(struct sockaddr));"
+                       "if (saddr == NULL) {"
+                       "    return(-1);"
+                       "}"
+                       "saddr->sa_len = sizeof(struct sockaddr);"
+                       "saddr->sa_family = AF_NDRV;"
+                       "strncpy(saddr->sa_data, iface, l);"
+                       "saddr->sa_data[l] = '\\0';"
+                       "return(saddr);"
+                   )))
+            (define-inline (##raw#makesaddr fd iface len d)
+                (raw-syscall
+                    (m fd iface len)
+                    d
+                    ()
+                    "open-raw-socket: could not create saddr"
+                    fd iface len)))
+        ;; string for the actual write call
+        (define-for-syntax raw-writestr    "sendto(fd, p, nleft, 0, (struct sockaddr *)saddr, sizeof(struct sockaddr))")
+        ;; string for the actual read call
+        (define-for-syntax raw-readstr     "recvfrom(fd, pkt, l, 0, (struct sockaddr *)saddr, &sas)")
     )
     (else
         (error "raw-sockets only supported for macosx and linux targets."))
@@ -330,157 +372,170 @@ BINDPROC
 ;;; ioctl/fcntl procedures
 
 ;; get the MTU size
-(define-inline (##raw#getmtu fd iface len)
-    (raw-syscall
-        ((foreign-lambda* integer32 ((integer32 fd) (c-string iface) (int l))
-#<<MTUPROC
-            struct ifreq ireq;
-            int ret;
-            bzero(&ireq, sizeof(struct ifreq));
-            strncpy(ireq.ifr_name, iface, l);
-            ireq.ifr_name[l] = '\0';
-            if (ioctl(fd, SIOCGIFMTU, &ireq) == -1)
-                return(-1);
-            return((MAKEMTU(ireq.ifr_mtu)));
-MTUPROC
-                ) fd iface len)
-        #f
-        ((##raw#close fd))
-        ##raw#getmtu
-        "open-raw-socket: could not get MTU size"
-        fd iface len))
+(let ((m   (foreign-lambda* int ((int fd) (c-string iface) (int l))
+               "struct ifreq ireq;"
+               "int ret;"
+               "bzero(&ireq, sizeof(struct ifreq));"
+               "strncpy(ireq.ifr_name, iface, l);"
+               "ireq.ifr_name[l] = '\\0';"
+               "if (ioctl(fd, SIOCGIFMTU, &ireq) == -1) {"
+               "    return(-1);"
+               "}"
+               "return((MAKEMTU(ireq.ifr_mtu)));"
+           )))
+    (define-inline (##raw#getmtu fd iface len)
+        (raw-syscall
+            (m fd iface len)
+            #f
+            ((##raw#close fd))
+            ##raw#getmtu
+            "open-raw-socket: could not get MTU size"
+            fd iface len)))
 
 ;; turn on promiscuous mode and return the current IF_FLAGS value
-(define-inline (##raw#promisc-on fd iface len)
-    (raw-syscall
-        ((foreign-lambda* integer32 ((integer32 fd) (c-string iface) (int l))
-#<<PONPROC
-            struct ifreq ireq;
-            int ret;
-            bzero(&ireq, sizeof(struct ifreq));
-            strncpy(ireq.ifr_name, iface, l);
-            ireq.ifr_name[l] = '\0';
-            if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1)
-                return(-1);
-            ret = ireq.ifr_flags;
-            ireq.ifr_flags |= IFF_PROMISC;
-            if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1)
-                return(-1);
-            return(ret);
-PONPROC
-            ) fd iface len)
-        #f
-        ((##raw#close fd))
-        ##raw#promisc-on
-        "open-raw-socket: could not set promiscuous mode"
-        fd iface len))
+(let ((p   (foreign-lambda* integer32 ((int fd) (c-string iface) (int l))
+               "struct ifreq ireq;"
+               "int ret;"
+               "bzero(&ireq, sizeof(struct ifreq));"
+               "strncpy(ireq.ifr_name, iface, l);"
+               "ireq.ifr_name[l] = '\\0';"
+               "if (ioctl(fd, SIOCGIFFLAGS, &ireq) == -1) {"
+               "    return(-1);"
+               "}"
+               "ret = ireq.ifr_flags;"
+               "ireq.ifr_flags |= IFF_PROMISC;"
+               "if (ioctl(fd, SIOCSIFFLAGS, &ireq) == -1) {"
+               "    return(-1);"
+               "}"
+               "return(ret);"
+           )))
+    (define-inline (##raw#promisc-on fd iface len)
+        (raw-syscall
+            (p fd iface len)
+            #f
+            ((##raw#close fd))
+            ##raw#promisc-on
+            "open-raw-socket: could not set promiscuous mode"
+            fd iface len)))
 
 ;; restore IF_FLAGS promiscuous mode state to original value
-(define-inline (##raw#promisc-off fd iface len promisc ml)
-    (raw-syscall
-        ((foreign-lambda* int ((integer32 fd) (c-string iface) (int l) (integer32 promisc))
-#<<POFFPROC
-            struct ifreq ireq;
-            bzero(&ireq, sizeof(struct ifreq));
-            strncpy(ireq.ifr_name, iface, l);
-            ireq.ifr_name[l] = '\0';
-            ireq.ifr_flags = promisc;
-            return((ioctl(fd, SIOCSIFFLAGS, &ireq)));
-POFFPROC
-            ) fd iface len promisc)
-        ml
-        ((##raw#close fd))
-        ##raw#promisc-off
-        "open-raw-socket: could not reset promiscuous mode"
-        fd iface len promisc))
+(let ((p   (foreign-lambda* int ((int fd) (c-string iface) (int l)
+                                 (integer32 promisc))
+               "struct ifreq ireq;"
+               "bzero(&ireq, sizeof(struct ifreq));"
+               "strncpy(ireq.ifr_name, iface, l);"
+               "ireq.ifr_name[l] = '\\0';"
+               "ireq.ifr_flags = promisc;"
+               "return((ioctl(fd, SIOCSIFFLAGS, &ireq)));"
+           )))
+    (define-inline (##raw#promisc-off fd iface len promisc ml)
+        (raw-syscall
+            (p fd iface len promisc)
+            ml
+            ((##raw#close fd))
+            ##raw#promisc-off
+            "open-raw-socket: could not reset promiscuous mode"
+            fd iface len promisc)))
 
 ;; set socket options
-(define-inline (##raw#sockopts fd)
-    (raw-syscall
-        ((foreign-lambda* int ((integer32 fd))
-#<<SOPTSPROC1
-            int flags = 0;
-            if ((flags = fcntl(fd, F_GETFL)) == -1)
-                return(-1);
-            flags |= O_NONBLOCK;
-            return((fcntl(fd, F_SETFL, flags)));
-SOPTSPROC1
-            ) fd)
-        #f
-        ((##raw#close fd))
-        ##raw#sockopts
-        "open-raw-socket: could not set nonblocking flag"
-        fd)
-    (raw-syscall
-        ((foreign-lambda* int ((integer32 fd))
-#<<SOPTSPROC2
-            int flags = 1;
-            return((setsockopt(fd, SOL_SOCKET, SO_OOBINLINE,
-                               &flags, sizeof(int))));
-SOPTSPROC2
-            ) fd)
-        #f
-        ((##raw#close fd))
-        ##raw#sockopts
-        "open-raw-socket: could not set socket options"
-        fd))
+(let ((s   (foreign-lambda* int ((int fd))
+               "int flags = 0;"
+               "if ((flags = fcntl(fd, F_GETFL)) == -1) {"
+               "    return(-1);"
+               "}"
+               "flags |= O_NONBLOCK;"
+               "return((fcntl(fd, F_SETFL, flags)));"
+           )))
+    (define-inline (##raw#sockopts fd)
+        (raw-syscall
+            (s fd)
+            #f
+            ((##raw#close fd))
+            ##raw#sockopts
+            "open-raw-socket: could not set nonblocking flag"
+            fd)))
 
 
 ;;; syscall bindings
 
+;; helper macro for string insertion
+(define-macro (foreign-lambda-wrap ret args . body)
+    `(foreign-lambda* ,ret (,@args)
+        ,@(map
+            (lambda (x)
+                (if (string? x)
+                    x
+                    (let ((y   (eval x)))
+                        (if (string? y)
+                            y
+                            x))))
+            body)))
+
 ;; send a packet
-(define-inline (##raw#send fd pkt len ml)
-    (raw-protect ml
-        (raw-syscall
-            ((foreign-lambda* int ((integer32 fd) (u8vector pkt) (int len))
-#<<SENDPROC
-                int nleft = len;
-                int nwrit = 0;
-                unsigned char *p = pkt;
-                while (nleft > 0) {
-                    nwrit = write(fd, p, nleft);
-                    if (nwrit <= 0) {
-                        if ((errno == EAGAIN) || (errno == EINTR))
-                            nwrit = 0;
-                        else
-                            return(-1);
-                    }
-                    nleft -= nwrit;
-                    p += nwrit;
-                }
-                return(0);
-SENDPROC
-                ) fd pkt len)
+(let ((s   (foreign-lambda-wrap int ((int fd) (u8vector pkt) (int l)
+                                     (c-pointer saddr))
+               "int nleft = l;"
+               "int nwrit = 0;"
+               "unsigned char *p = pkt;"
+               "while (nleft > 0) {"
+               "    nwrit = " raw-writestr ";"
+               "    if (nwrit <= 0) {"
+               "        if (nwrit == 0) {"
+               "            return(0);"
+               "        }"
+               "        else if (errno == EINTR) {"
+               "            nwrit = 0;"
+               "        }"
+               "        else if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {"
+               "            return(0);"
+               "        }"
+               "        else {"
+               "            return(-1);"
+               "        }"
+               "    }"
+               "    nleft -= nwrit;"
+               "    p += nwrit;"
+               "}"
+               "return(0);"
+           )))
+    (define-inline (##raw#send fd pkt len saddr ml)
+        (raw-protect
             ml
-            ()
-            ##raw#send
-            "raw-socket-send: could not send packet"
-            fd pkt len)))
+            (raw-syscall
+                (s fd pkt len saddr)
+                ml
+                ()
+                ##raw#send
+                "raw-socket-send: could not send packet"
+                fd pkt len saddr))))
 
 ;; receive a packet
-(define-inline (##raw#receive fd pkt len ml)
-    (raw-protect ml
-        (raw-syscall
-            ((foreign-lambda* integer32 ((integer32 fd) (u8vector pkt) (int l))
-#<<RECVPROC
-                int ret;
-                while ((ret = read(fd, pkt, l)) == -1) {
-                    if (errno == EINTR)
-                        continue;
-                    else if (errno == EAGAIN)
-                        return(0);
-                    else
-                        return(-1);
-                }
-                return(ret);
-RECVPROC
-                ) fd pkt len)
-            ml
-            ()
-            ##raw#receive
-            "raw-socket-recvers: could not read from socket"
-            fd pkt len)))
-
+(let ((r   (foreign-lambda-wrap integer32 ((int fd) (u8vector pkt) (int l)
+                                           (c-pointer saddr))
+               "int ret;"
+               "int sas = sizeof(struct sockaddr);"
+               "while ((ret = " raw-readstr ") == -1) {"
+               "    if (errno == EINTR) {"
+               "        continue;"
+               "    }"
+               "    else if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {"
+               "        return(0);"
+               "    }"
+               "    else {"
+               "        return(-1);"
+               "    }"
+               "}"
+               "return(ret);"
+           )))
+    (define-inline (##raw#receive fd pkt len saddr ml)
+        (raw-protect ml
+            (raw-syscall
+                (r fd pkt len saddr)
+                ml
+                ()
+                ##raw#receive
+                "raw-socket-recvers: could not read from socket"
+                fd pkt len s))))
 
 
 ;;; scheme interface
@@ -493,6 +548,7 @@ RECVPROC
 
 
 ;;; raw-socket structure
+;;;
 ;;; 1  2     3   4     5     6       7      8      9       10     11
 ;;; fd iface mtu flags open? recvers wqueue rmutex rthread wmutex wthread
 
@@ -546,9 +602,11 @@ RECVPROC
 
 ;; create a writing thread thunk
 (define-inline (##raw#thread-write d)
-    (let ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
-          (wq   (##raw#wqueue d))
-          (fd   (##raw#fd d)))
+    (let* ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
+           (wq   (##raw#wqueue d))
+           (fd   (##raw#fd d))
+           (fa   (##raw#iface d))
+           (s    (##raw#makesaddr fd fa (string-length fa) d)))
         (lambda ()
             (debug-display (current-thread) "started thread-write")
             (let loop ((c   (current-thread))
@@ -557,9 +615,11 @@ RECVPROC
                 (if (##raw#ewqueue? d)
                     (if (thread-specific c)
                         (loop c (thread-yield!))
-                        (debug-display c "thread-specific empty"))
+                        (begin
+                            (and s (free s))
+                            (debug-display c "thread-specific empty")))
                     (let* ((t   (raw-protect mx (queue-remove! wq)))
-                           (n   (##raw#send fd t (u8vector-length t) mx)))
+                           (n   (##raw#send fd t (u8vector-length t) s mx)))
                         (if (= 0 n)
                             (if (thread-specific c)
                                 (begin
@@ -567,28 +627,35 @@ RECVPROC
                                     (loop c (thread-yield!)))
                                 (begin
                                     (debug-display c "thread-specific 0 end")
-                                (raw-protect mx (queue-push-back! wq t))))
+                                    (and s (free s))
+                                    (raw-protect mx (queue-push-back! wq t))))
                             (if (thread-specific c)
                                 (loop c (debug-display c "write successful " n))
-                                (debug-display c "thread-specific end")))))))))
+                                (begin
+                                    (debug-display c "thread-specific end")
+                                    (and s (free s)))))))))))
 
 ;; create a reading thread thunk
 (define-inline (##raw#thread-read d)
-    (let ((fd   (##raw#fd d))
-          (m    (##raw#mtu d))
-          (p    (make-u8vector (##raw#mtu d) 0))
-          (mx   (##raw#rmutex d)))
+    (let* ((fd   (##raw#fd d))
+           (m    (##raw#mtu d))
+           (p    (make-u8vector m 0))
+           (fa   (##raw#iface d))
+           (s    (##raw#makesaddr fd fa (string-length fa) d))
+           (mx   (##raw#rmutex d)))
         (lambda ()
             (debug-display (current-thread) "started thread-read")
             (let loop ((c   (current-thread))
-                       (r   (##raw#receive fd p m mx)))
+                       (r   (##raw#receive fd p m s mx)))
                 (debug-display c "started read loop")
                 (if (= 0 r)
                     (if (thread-specific c)
                         (begin
                             (thread-yield!)
-                            (loop c (##raw#receive fd p m mx)))
-                        (debug-display c "thread-specific noin")) 
+                            (loop c (##raw#receive fd p m s mx)))
+                        (begin
+                            (and s (free s))
+                            (debug-display c "thread-specific noin")) )
                     (let ((u   (subu8vector p 0 r)))
                         (for-each
                             (lambda (recver)
@@ -596,8 +663,10 @@ RECVPROC
                             (##raw#recvers d))
                         (debug-display c "read successful\n" u)
                         (if (thread-specific c)
-                            (loop c (##raw#receive fd p m mx))
-                            (debug-display c "thread-specific end"))))))))
+                            (loop c (##raw#receive fd p m s mx))
+                            (begin
+                                (and s (free s))
+                                (debug-display c "thread-specific end")))))))))
 
 
 ;;; opening and querying raw sockets
