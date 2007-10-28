@@ -38,6 +38,7 @@
     (raw-socket-send sock (generate-my-packet 16)))
 
 (define thr (make-thread send-packets))
+(thread-quantum-set! thr 2000)
 (thread-start! thr)
 (thread-join! thr)
 (close-raw-socket sock)
