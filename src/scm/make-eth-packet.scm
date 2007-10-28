@@ -35,12 +35,13 @@
 (define sock (open-raw-socket "lo0"))
 (define (send-packets)
     (raw-socket-send sock (generate-my-packet 8))
-    (raw-socket-send sock (generate-my-packet 16)))
+    (raw-socket-send sock (generate-my-packet 16))
+    (thread-resume! cthr))
 
-(define thr (make-thread send-packets))
-(thread-quantum-set! thr 2000)
-(thread-start! thr)
-(thread-join! thr)
+(define cthr (current-thread))
+(define sthr (make-thread send-packets))
+(thread-start! mthr)
+(thread-suspend! cthr)
 (close-raw-socket sock)
 
 ;(let ([sock   (open-raw-socket "lo0")]
