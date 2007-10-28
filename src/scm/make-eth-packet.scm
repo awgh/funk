@@ -32,12 +32,24 @@
 
 ; send packet out 
 (require 'raw-sockets-experimental)
-(let ([sock (open-raw-socket "lo0")])
-  (let ([pkt (generate-my-packet 8)]) 
-    (raw-socket-send sock pkt))
-  (let ([pkt (generate-my-packet 16)]) 
-    (raw-socket-send sock pkt))
-  (close-raw-socket sock))
+(define sock (open-raw-socket "lo0"))
+(define (send-packets)
+    (raw-socket-send sock (generate-my-packet 8))
+    (raw-socket-send sock (generate-my-packet 16)))
+
+(define thr (make-thread send-packets))
+(thread-start! thr)
+(thread-join! thr)
+(close-raw-socket sock)
+
+;(let ([sock   (open-raw-socket "lo0")]
+;      (pkt1   (generate-my-packet 8))
+;      (pkt2   (generate-my-packet 16)))
+;  (let ([pkt (generate-my-packet 8)]) 
+;    (raw-socket-send sock pkt))
+;  (let ([pkt (generate-my-packet 16)]) 
+;    (raw-socket-send sock pkt))
+;  (close-raw-socket sock))
 
 ; test validation
 ;(define (validate-my-packet len) 
