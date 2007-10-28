@@ -603,14 +603,13 @@
 ;; create a writing thread thunk
 (define-inline (##raw#thread-write d)
     (let* ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
-           (wq   (##raw#wqueue d))
            (fd   (##raw#fd d))
            (fa   (##raw#iface d))
            (s    (##raw#makesaddr fd fa (string-length fa) d)))
         (lambda ()
             (debug-display (current-thread) "started thread-write")
-            (let loop ((c   (current-thread))
-                       (y   #f))
+            (let loop ((c    (current-thread))
+                       (y    #f))
                 (debug-display c "started write loop")
                 (if (##raw#ewqueue? d)
                     (if (thread-specific c)
@@ -618,17 +617,23 @@
                         (begin
                             (and s (free s))
                             (debug-display c "thread-specific empty")))
-                    (let* ((t   (raw-protect mx (queue-remove! wq)))
+                    (let* ((t   (raw-protect
+                                    mx
+                                    (queue-remove! (##raw#wqueue d))))
                            (n   (##raw#send fd t (u8vector-length t) s mx)))
                         (if (= 0 n)
                             (if (thread-specific c)
                                 (begin
-                                    (raw-protect mx (queue-push-back! wq t))
+                                    (raw-protect
+                                        mx
+                                        (queue-push-back! (##raw#wqueue d) t))
                                     (loop c (thread-yield!)))
                                 (begin
                                     (debug-display c "thread-specific 0 end")
                                     (and s (free s))
-                                    (raw-protect mx (queue-push-back! wq t))))
+                                    (raw-protect
+                                        mx
+                                        (queue-push-back! (##raw#wqueue d) t))))
                             (if (thread-specific c)
                                 (loop c (debug-display c "write successful " n))
                                 (begin
