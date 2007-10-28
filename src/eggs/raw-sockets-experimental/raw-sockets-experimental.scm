@@ -89,6 +89,7 @@
             raw-socket-wmutex
             raw-socket-wthread
             raw-socket-send
+            raw-socket-send-flush
             raw-socket-add-recver
             raw-socket-del-recver
             raw-socket-recvers
@@ -127,6 +128,7 @@
             raw-socket-wmutex
             raw-socket-wthread
             raw-socket-send
+            raw-socket-send-flush
             raw-socket-add-recver
             raw-socket-del-recver
             raw-socket-recvers
@@ -496,7 +498,7 @@
                "    nleft -= nwrit;"
                "    p += nwrit;"
                "}"
-               "return(0);"
+               "return(l);"
            )))
     (define-inline (##raw#send fd pkt len saddr ml)
         (raw-protect
@@ -605,6 +607,7 @@
     (let* ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
            (fd   (##raw#fd d))
            (fa   (##raw#iface d))
+           (wq   (##raw#wqueue d))
            (s    (##raw#makesaddr fd fa (string-length fa) d)))
         (lambda ()
             (debug-display (current-thread) "started thread-write")
@@ -617,24 +620,18 @@
                         (begin
                             (and s (free s))
                             (debug-display c "thread-specific empty")))
-                    (let* ((t   (raw-protect
-                                    mx
-                                    (queue-remove! (##raw#wqueue d))))
+                    (let* ((t   (raw-protect mx (queue-remove! wq)))
                            (n   (##raw#send fd t (u8vector-length t) s mx)))
-                        (debug-display c "writing:" n t)
+                        (debug-display c "writing: " n " " t)
                         (if (= 0 n)
                             (if (thread-specific c)
                                 (begin
-                                    (raw-protect
-                                        mx
-                                        (queue-push-back! (##raw#wqueue d) t))
+                                    (raw-protect mx (queue-push-back! wq t))
                                     (loop c (thread-yield!)))
                                 (begin
                                     (debug-display c "thread-specific 0 end")
                                     (and s (free s))
-                                    (raw-protect
-                                        mx
-                                        (queue-push-back! (##raw#wqueue d) t))))
+                                    (raw-protect mx (queue-push-back! wq t))))
                             (if (thread-specific c)
                                 (loop c (debug-display c "write successful " n))
                                 (begin
@@ -787,6 +784,16 @@
         (raw-error 'raw-socket-send #f (conc "pkt is not a u8vector: " pkt)
                    s pkt))
     (##raw#awqueue! s pkt))
+
+;; flush the send queue
+(define (raw-socket-send-flush s)
+    (check-raw-socket 'raw-socket-send-flush s)
+    (let loop ((e   (##raw#ewqueue? s)))
+        (if e
+            #t
+            (begin
+                (thread-sleep! 1)
+                (loop (##raw#ewqueue? s))))))
 
 
 ;;; reading from a packet socket

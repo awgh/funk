@@ -32,10 +32,18 @@
 
 ; send packet out 
 (require 'raw-sockets-experimental)
-(define sock (open-raw-socket "lo0"))
+(define sock (open-raw-socket "lo"))
 (define (send-packets)
     (raw-socket-send sock (generate-my-packet 8))
     (raw-socket-send sock (generate-my-packet 16))
+    (raw-socket-send sock (generate-my-packet 32))
+    (raw-socket-send sock (generate-my-packet 16))
+    (raw-socket-send sock (generate-my-packet 16))
+    (raw-socket-send-flush sock)
+    ;(raw-socket-send sock (generate-my-packet 16))
+   ; (raw-socket-send sock (list->u8vector (map char->integer (string->list "hello!"))))
+    ;(raw-socket-send sock (list->u8vector (map char->integer (string->list "testing12345"))))
+    ;(raw-socket-send sock (list->u8vector (map char->integer (string->list "goodbye!"))))
     (thread-resume! cthr))
 
 (define cthr (current-thread))
