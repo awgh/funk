@@ -151,9 +151,9 @@
     ))
 (eval-when (load eval)
     (eval `(define-macro (raw-protect-region write? mx b . r)
-              `(raw-protect (cons ,(##sys#slot mx 8)
+              `(raw-protect (cons (##sys#slot ,mx 8)
                                   (if ,write?
-                                      (list ,(##sys#slot mx 10))
+                                      (list (##sys#slot ,mx 10))
                                       '()))
                             ,b
                             ,@r)))
@@ -598,10 +598,6 @@
 
 ;;; threads
 
-(define (debug-display t . a)
-    (display (apply conc "debug:  " (thread-name t) " - " a))
-    (newline))
-
 ;; create a writing thread thunk
 (define-inline (##raw#thread-write d)
     (let* ((mx   (list (##raw#rmutex d) (##raw#wmutex d)))
@@ -610,33 +606,25 @@
            (wq   (##raw#wqueue d))
            (s    (##raw#makesaddr fd fa (string-length fa) d)))
         (lambda ()
-            (debug-display (current-thread) "started thread-write")
             (let loop ((c    (current-thread))
                        (y    #f))
-                (debug-display c "started write loop")
                 (if (##raw#ewqueue? d)
                     (if (thread-specific c)
                         (loop c (thread-yield!))
-                        (begin
-                            (and s (free s))
-                            (debug-display c "thread-specific empty")))
+                        (and s (free s)))
                     (let* ((t   (raw-protect mx (queue-remove! wq)))
                            (n   (##raw#send fd t (u8vector-length t) s mx)))
-                        (debug-display c "writing: " n " " t)
                         (if (= 0 n)
                             (if (thread-specific c)
                                 (begin
                                     (raw-protect mx (queue-push-back! wq t))
                                     (loop c (thread-yield!)))
                                 (begin
-                                    (debug-display c "thread-specific 0 end")
                                     (and s (free s))
                                     (raw-protect mx (queue-push-back! wq t))))
                             (if (thread-specific c)
-                                (loop c (debug-display c "write successful " n))
-                                (begin
-                                    (debug-display c "thread-specific end")
-                                    (and s (free s)))))))))))
+                                (loop c #t)
+                                (and s (free s))))))))))
 
 ;; create a reading thread thunk
 (define-inline (##raw#thread-read d)
@@ -647,29 +635,22 @@
            (s    (##raw#makesaddr fd fa (string-length fa) d))
            (mx   (##raw#rmutex d)))
         (lambda ()
-            (debug-display (current-thread) "started thread-read")
             (let loop ((c   (current-thread))
                        (r   (##raw#receive fd p m s mx)))
-                (debug-display c "started read loop")
                 (if (= 0 r)
                     (if (thread-specific c)
                         (begin
                             (thread-yield!)
                             (loop c (##raw#receive fd p m s mx)))
-                        (begin
-                            (and s (free s))
-                            (debug-display c "thread-specific noin")) )
+                        (and s (free s)))
                     (let ((u   (subu8vector p 0 r)))
                         (for-each
                             (lambda (recver)
                                 (raw-protect mx ((cdr recver) u r)))
                             (##raw#recvers d))
-                        (debug-display c "read successful\n" u)
                         (if (thread-specific c)
                             (loop c (##raw#receive fd p m s mx))
-                            (begin
-                                (and s (free s))
-                                (debug-display c "thread-specific end")))))))))
+                            (and s (free s)))))))))
 
 
 ;;; opening and querying raw sockets
