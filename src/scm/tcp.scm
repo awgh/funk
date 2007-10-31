@@ -39,7 +39,8 @@
          (u8vector-set! crcbuf 10 (fxand 255 (fxshr tcpsize 8)))
          (u8vector-set! crcbuf 11 (fxand 255 tcpsize))
          (u8vector-copy! genbuf 0 crcbuf 12 (u8vector-length genbuf)) ; copy the rest
-         (if data (u8vector-copy! data 0 crcbuf (+ 12 tcpsize) (u8vector-length data)))
+         ;(if data (u8vector-copy! data 0 crcbuf (+ 12 tcpsize) (u8vector-length data)))
+         (if data (u8vector-copy! data 0 crcbuf (+ 12 (u8vector-length genbuf)) (u8vector-length data)))
          (u8vector-copy! (crc-16 crcbuf (u8vector-length crcbuf)) 0 genbuf 16 2)
          (if data (u8vector-cat genbuf data)
          genbuf)
