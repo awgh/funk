@@ -1,18 +1,20 @@
-;;;; egg:      raw-sockets-experimental
-;;;; file:     raw-sockets-experimental.scm
+;;;; egg:      raw-sockets
+;;;; file:     raw-sockets.scm
 ;;;; author:   Lenny Frank <elf@ephemeral.net>
 ;;;; author:   Benjamin L. Kurtz <bk2@alum.wpi.edu>
-;;;; date:     18 Sep 2007
+;;;; date:     09 Nov 2007
 ;;;; licence:  BSD (see LICENCE)
-;;;; version:  3.0
+;;;; version:  2.0
 ;;;; purpose:  UNIX packet socket interface
 ;;;;
-;;;; history:  3.0  Removed raw-recv (elf)
+;;;; history:  2.0  Switched to threading model (elf)
+;;;;                Profiling and optimisation (elf)
+;;;;           1.3  Removed raw-recv (elf)
 ;;;;                Added read handlers (elf, bk2)
 ;;;;                Set promiscuous mode (elf)
 ;;;;                Proper MTU checking (elf)
-;;;;           2.1  Added non-blocking read (elf)
-;;;;           2.0  Refactored and cleaned everything (elf)
+;;;;           1.2  Added non-blocking read (elf)
+;;;;           1.1  Refactored and cleaned everything (elf)
 ;;;;           1.0  Initial release (bk2)
 
 
@@ -135,7 +137,7 @@
             close-raw-socket
             raw-protect-region
             )
-        (emit-exports "raw-sockets-experimental.exports")
+        (emit-exports "raw-sockets.exports")
         (fixnum-arithmetic)
         (lambda-lift)
         (inline)
